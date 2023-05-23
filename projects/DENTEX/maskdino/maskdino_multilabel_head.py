@@ -1,63 +1,34 @@
-# Copyright (c) OpenMMLab. All rights reserved.
-import copy
 import warnings
-from typing import List, Tuple
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import Conv2d
-from mmcv.ops import point_sample
-from mmengine.model import ModuleList, caffe2_xavier_init
-from mmengine.structures import InstanceData
-from torch import Tensor
 
-from mmdet.registry import MODELS, TASK_UTILS
-from mmdet.structures import SampleList
-from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig, reduce_mean
-from mmdet.structures.bbox import bbox_xyxy_to_cxcywh, bbox_cxcywh_to_xyxy
-from .maskdino_encoder_layers import MaskDINOEncoder
-from .maskdino_decoder_layers import MaskDINODecoder
-from .criterion import SetCriterion
+from mmdet.registry import MODELS
+from mmdet.utils import OptConfigType
 
-from mmdet.utils.memory import AvoidCUDAOOM
-from mmengine.structures import InstanceData, PixelData
-# from ..layers import Mask2FormerTransformerDecoder, SinePositionalEncoding
-# from ..utils import get_uncertain_point_coords_with_randomness
-# from .anchor_free_head import AnchorFreeHead
-# from .maskformer_head import MaskFormerHead
+from projects.MaskDINO.maskdino.maskdino_head import (
+    bbox_xyxy_to_cxcywh,
+    MaskDINOHead,
+)
+from projects.DENTEX.maskdino.criterion import SetMultilabelCriterion
+from projects.DENTEX.maskdino.maskdino_multilabel_decoder_layers import MaskDINOMultilabelDecoder
 
 
 @MODELS.register_module()
-class MaskDINOHead(nn.Module):
+class MaskDINOMultilabelHead(MaskDINOHead):
 
     def __init__(
         self,
-        num_stuff_classes: int,
-        num_things_classes: int,
-        encoder: OptConfigType,
         decoder: OptConfigType,
         train_cfg: OptConfigType = None,
-        test_cfg: OptConfigType = None,
+        *args, **kwargs,
     ):
-        super().__init__()
-        self.num_stuff_classes = num_stuff_classes
-        self.num_things_classes = num_things_classes
-        self.num_classes = num_stuff_classes + num_things_classes
-        self.train_cfg = train_cfg
-        self.test_cfg = test_cfg
+        num_attributes = decoder.pop('num_attributes')
+        super().__init__(decoder=decoder, train_cfg=train_cfg, *args, **kwargs)
 
-        self.pixel_decoder = MaskDINOEncoder(**encoder)
-        self.predictor = MaskDINODecoder(**decoder)
-        self.criterion = SetCriterion(**train_cfg)
-
-    def forward(self, features, mask=None, targets=None):
-        mask_features, transformer_encoder_features, multi_scale_features = \
-            self.pixel_decoder.forward_features(features, mask)
-
-        predictions = self.predictor(multi_scale_features, mask_features,
-                                     mask, targets=targets)
-        return predictions
+        decoder['num_attributes'] = num_attributes
+        self.predictor = MaskDINOMultilabelDecoder(**decoder)
+        self.criterion = SetMultilabelCriterion(**train_cfg)
 
     def loss(self, feats, batch_data_samples):
         targets = self.prepare_targets(batch_data_samples)
@@ -79,6 +50,7 @@ class MaskDINOHead(nn.Module):
         mask_cls_results = outputs["pred_logits"]
         mask_pred_results = outputs["pred_masks"]
         mask_box_results = outputs["pred_boxes"]
+        mask_attrs_results = outputs["pred_multilabel_logits"]
 
         # upsample masks
         batch_input_shape = batch_data_samples[0].metainfo['batch_input_shape']
@@ -88,7 +60,7 @@ class MaskDINOHead(nn.Module):
             mode='bilinear',
             align_corners=False)
 
-        return mask_cls_results, mask_pred_results, mask_box_results
+        return mask_cls_results, mask_pred_results, mask_box_results, mask_attrs_results
 
     def prepare_targets(self, batch_data_samples):
         # h_pad, w_pad = images.tensor.shape[-2:]  # TODO: Here is confusing
@@ -107,7 +79,8 @@ class MaskDINOHead(nn.Module):
                 {
                     "labels": data_sample.gt_instances.labels,
                     "masks": padded_masks,
-                    "boxes": bbox_xyxy_to_cxcywh(data_sample.gt_instances.bboxes) / image_size_xyxy
+                    "boxes": bbox_xyxy_to_cxcywh(data_sample.gt_instances.bboxes) / image_size_xyxy,
+                    "multilabels": data_sample.gt_instances.multilabels,
                 }
             )
 
