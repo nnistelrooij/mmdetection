@@ -17,7 +17,7 @@ class SetMultilabelCriterion(SetCriterion):
 
     def __init__(
         self,
-        attributes_weight=32.0,
+        attributes_weight=8.0,
         *args,
         **kwargs
     ):
@@ -67,9 +67,20 @@ class SetMultilabelCriterion(SetCriterion):
         if loss == 'multilabels':
             indices = copy.deepcopy(indices)
             for i, (idxs_i, idxs_j) in enumerate(indices):
+                # keep all teeth with at least one diagnosis
                 keep_mask = torch.any(targets[i]['multilabels'], dim=-1).to(idxs_i.device)
                 keep_mask = keep_mask[idxs_j]
 
+                # keep at most two teeth without diagnosis
+                remove_idxs = torch.nonzero(~keep_mask)[:, 0]
+                if remove_idxs.shape[0] > 0:
+                    keep_idxs = torch.multinomial(
+                        input=torch.ones(remove_idxs.shape[0]),
+                        num_samples=min(remove_idxs.shape[0], 2),
+                    )
+                    keep_mask[remove_idxs[keep_idxs]] = True
+                
+                # update indices
                 indices[i] = idxs_i[keep_mask], idxs_j[keep_mask]
 
         assert loss in loss_map, f"do you really want to compute {loss} loss?"

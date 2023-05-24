@@ -1,0 +1,1 @@
+from projects.DENTEX.visualization.local_visualizer import MultilabelDetLocalVisualizer

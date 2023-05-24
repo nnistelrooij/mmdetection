@@ -2,13 +2,13 @@ _base_ = '/home/mkaailab/Documents/DENTEX/dentex/mmdetection/projects/MaskDINO/c
 
 custom_imports = dict(
     imports=[
-        'projects.MaskDINO.maskdino',
         'projects.DENTEX.datasets.coco_multilabel',
         'projects.DENTEX.datasets.transforms.loading',
         'projects.DENTEX.datasets.transforms.formatting',
         'projects.DENTEX.datasets.transforms.transforms',
-        'projects.DENTEX.evaluation.metrics.coco_opg_metric',
+        'projects.DENTEX.evaluation',
         'projects.DENTEX.maskdino',
+        'projects.DENTEX.visualization',
     ],
     allow_failed_imports=False,
 )
@@ -94,31 +94,52 @@ val_pipeline=[
 val_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 test_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 
-max_epochs = 36
+max_epochs = 500
 train_cfg = dict(
     _delete_=True,
-    type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
-
-val_cfg = dict(type='ValLoop')
-test_cfg = dict(type='TestLoop')
-
-model = dict(
-    type='MaskDINOMultilabel',
-    train_cfg=dict(num_classes=32),
-    test_cfg=dict(panoptic_on=False, instance_on=True, max_per_image=100),
-    panoptic_head=dict(
-        type='MaskDINOMultilabelHead',
-        decoder=dict(num_classes=32, num_attributes=4),
-    ),
-    panoptic_fusion_head=dict(type='MaskDINOMultilabelFusionHead'),
+    type='EpochBasedTrainLoop',
+    max_epochs=max_epochs,
+    val_interval=5,
 )
-
 param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[27, 33],
-        gamma=0.1)
+        milestones=[int(max_epochs * 8 / 9), int(max_epochs * 26 / 27)],
+        gamma=0.1,
+    )
 ]
+
+val_cfg = dict(type='ValLoop')
+test_cfg = dict(type='TestLoop')
+
+model = dict(
+    type='MaskDINOMultilabel',
+    test_cfg=dict(panoptic_on=False, instance_on=True, max_per_image=100),
+    panoptic_head=dict(type='MaskDINOMultilabelHead'),
+    panoptic_fusion_head=dict(type='MaskDINOMultilabelFusionHead'),
+)
+
+default_hooks = dict(
+    checkpoint=dict(
+        interval=5,
+        by_epoch=True,
+        save_best='coco/segm_exclude=False',
+        rule='greater',
+    ),
+    visualization=dict(
+        draw=True,
+        interval=5,
+    ),
+)
+
+visualizer = dict(
+    type='MultilabelDetLocalVisualizer',
+    vis_backends=[
+        dict(type='LocalVisBackend'),
+        dict(type='TensorboardVisBackend'),
+    ])
+
+auto_scale_lr = dict(enable=True)

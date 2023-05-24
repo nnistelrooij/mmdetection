@@ -14,6 +14,7 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
     def __init__(
         self,
         num_attributes: int,
+        enable_multilabel: bool,
         *args,
         **kwargs,
     ):
@@ -25,6 +26,7 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
 
         if self.mask_classification:
             self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
+        self.enable_multilabel = enable_multilabel
 
     def dn_post_process(
         self,
@@ -249,7 +251,13 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
 
         decoder_output = self.decoder.norm(output)
         decoder_output = decoder_output.transpose(0, 1)
-        outputs_attributes = self.attributes_embed(decoder_output)
+        
+        if not self.enable_multilabel:
+            with torch.no_grad():
+                outputs_attributes = self.attributes_embed(decoder_output)
+        else:
+            outputs_attributes = self.attributes_embed(decoder_output)
+
         
         return outputs_class, outputs_mask, outputs_attributes
 

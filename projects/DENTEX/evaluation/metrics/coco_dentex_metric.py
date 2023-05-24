@@ -2,7 +2,7 @@ import copy
 import json
 from pathlib import Path
 import tempfile
-from typing import Callable, Dict, List, Sequence
+from typing import Dict, List, Sequence
 
 from mmengine.fileio import dump
 import numpy as np
@@ -13,7 +13,7 @@ from mmdet.evaluation import CocoMetric
 
 
 @METRICS.register_module()
-class CocoOPGMetric(CocoMetric):
+class CocoDENTEXMetric(CocoMetric):
 
     QUADRANT_NAME2CAT = {
         f'{q}{e}': {'id': q - 1, 'name': str(q)}
@@ -50,43 +50,68 @@ class CocoOPGMetric(CocoMetric):
     def ann2cats(
         self,
         ann,
-        cat_map,
+        cat_map: Dict[str, Dict],
+        exclude_normal: bool,
     ) -> List[int]:
         if (
             'extra' not in ann or
-            'attributes' not in ann['extra']
+            'attributes' not in ann['extra'] or
+            len(ann['extra']['attributes']) == 0
         ):
-            return []
-        
-        cat_name = self._coco_api.cats[ann['category_id']]['name']
-        cat_ids = [cat_map[cat_name]['id']] if cat_name in cat_map else []
+            if exclude_normal:
+                return []
+            
+            cat_name = self._coco_api.cats[ann['category_id']]['name']
+            return [cat_map[cat_name]['id']] if cat_name in cat_map else []
 
-        for cat_name in ann['extra']['attributes']:
-            if cat_name in cat_map:
-                cat_ids.append(cat_map[cat_name]['id'])
+        cat_ids = []
+        for attr in ann['extra']['attributes']:
+            cat_name = self._coco_api.cats[ann['category_id']]['name']
+            if cat_name not in cat_map:
+                cat_name = attr
+
+            cat_ids.append(cat_map[cat_name]['id'])
 
         return cat_ids
+    
+    def labels2cats(
+        self,
+        label: int,
+        multilabel: List[int],
+        cat_map: Dict[str, Dict],
+        exclude_normal: bool,
+    ) -> List[int]:
+        if not np.any(multilabel):
+            if exclude_normal:
+                return []
+            
+            cat_name = self.dataset_meta['classes'][label]
+            return [cat_map[cat_name]['id']] if cat_name in cat_map else []
+
+        cat_ids = []
+        for attr_idx in np.nonzero(multilabel)[0]:
+            cat_name = self.dataset_meta['classes'][label]
+            if cat_name not in cat_map:
+                cat_name = self.dataset_meta['attributes'][attr_idx]
+
+            cat_ids.append(cat_map[cat_name]['id'])
+
+        return cat_ids        
     
     def pred2cats(
         self,
         pred,
-        cat_map,
+        cat_map: Dict[str, Dict],
+        exclude_normal: bool
     ) -> List[int]:
         bboxes, scores, labels, masks = [], [], [], []
         for bbox, score, label, mask, multilabel in zip(*(pred[key] for key in [
             'bboxes', 'scores', 'labels', 'masks', 'multilabels',
         ])):
-            if not np.any(multilabel):
-                continue
-
-            for label in np.nonzero(multilabel)[0]:
-                cat_name = self.dataset_meta['classes'][label]
-                if cat_name not in cat_map:
-                    cat_name = self.dataset_meta['attributes'][label]
-
+            for cat_id in self.labels2cats(label, multilabel, cat_map, exclude_normal):
                 bboxes.append(bbox)
                 scores.append(score)
-                labels.append(cat_map[cat_name]['id'])
+                labels.append(cat_id)
                 masks.append(mask)
 
         pred = {
@@ -110,7 +135,8 @@ class CocoOPGMetric(CocoMetric):
         with open(coco_json_path, 'r') as f:
             coco_json_dict = json.load(f)
 
-        coco_json_dict['categories'] = list(cat_map.values())
+        categories = {cat['id']: cat for cat in cat_map.values()}
+        coco_json_dict['categories'] = list(categories.values())
 
         dump(coco_json_dict, coco_json_path)
 
@@ -120,6 +146,7 @@ class CocoOPGMetric(CocoMetric):
         self,
         gts: list,
         cat_map: Dict[str, Dict],
+        exclude_normal: bool,
     ) -> COCO:
         gt_dicts = []
         for gt_dict in gts:
@@ -137,7 +164,7 @@ class CocoOPGMetric(CocoMetric):
 
                 ann['mask'] = ann['segmentation']
 
-                cat_ids = self.ann2cats(ann, cat_map)
+                cat_ids = self.ann2cats(ann, cat_map, exclude_normal)
                 for cat_id in cat_ids:
                     ann = copy.deepcopy(ann)
                     ann['bbox_label'] = cat_id
@@ -161,10 +188,11 @@ class CocoOPGMetric(CocoMetric):
         self,
         preds: list,
         cat_map: Dict[str, Dict],
+        exclude_normal: bool,
     ) -> list:
         preds_list = []
         for pred in preds:
-            pred = self.pred2cats(pred, cat_map)
+            pred = self.pred2cats(pred, cat_map, exclude_normal)
             preds_list.append(pred)
 
         return preds_list
@@ -172,27 +200,33 @@ class CocoOPGMetric(CocoMetric):
     def compute_metrics_single(
         self,
         results: list,
-        cat_map: Callable[[Dict], List[int]],
+        cat_map: Dict[str, Dict],
     ) -> Dict[str, float]:
-        results = copy.deepcopy(results)
-        gts, preds = zip(*results)
+        task_metrics = {}
+        for exclude_normal in [False, True]:
+            results = copy.deepcopy(results)
+            gts, preds = zip(*results)
 
-        coco = self.prepare_gts(gts, cat_map)
-        preds = self.prepare_preds(preds, cat_map)
+            coco = self.prepare_gts(gts, cat_map, exclude_normal)
+            preds = self.prepare_preds(preds, cat_map, exclude_normal)
 
-        self._orig_coco_api = self._coco_api
-        self._coco_api = coco
-        self.cat_ids = np.unique([c['id'] for c in cat_map.values()])
+            self._orig_coco_api = self._coco_api
+            self._coco_api = coco
+            self.cat_ids = np.unique([c['id'] for c in cat_map.values()])
 
-        results = zip(gts, preds)
-        metrics = super().compute_metrics(results)
+            metrics = super().compute_metrics(zip(gts, preds))
 
-        self._coco_api = self._orig_coco_api
+            task_metrics.update({
+                k.replace('_', f'_exclude={exclude_normal}_', 1): v
+                for k, v in metrics.items()
+            })
 
-        return metrics
+            self._coco_api = self._orig_coco_api
+
+        return task_metrics
 
     def compute_metrics(self, results: list) -> Dict[str, float]:
-        metrics = {metric: [] for metric in self.metrics}
+        metrics = {}
         for cat_map in [
             self.QUADRANT_NAME2CAT,
             self.ENUMERATION_NAME2CAT,
@@ -201,6 +235,7 @@ class CocoOPGMetric(CocoMetric):
             task_metrics = self.compute_metrics_single(results, cat_map)
 
             for metric, value in task_metrics.items():
-                metrics[metric.split('_')[0]].append(value)
+                metric_name = '_'.join(metric.split('_')[:2])
+                metrics.setdefault(metric_name, []).append(value)
             
         return {metric: np.mean(values) for metric, values in metrics.items()}

@@ -24,9 +24,11 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         *args, **kwargs,
     ):
         num_attributes = decoder.pop('num_attributes')
+        enable_multilabel = decoder.pop('enable_multilabel')
         super().__init__(decoder=decoder, train_cfg=train_cfg, *args, **kwargs)
 
         decoder['num_attributes'] = num_attributes
+        decoder['enable_multilabel'] = enable_multilabel
         self.predictor = MaskDINOMultilabelDecoder(**decoder)
         self.criterion = SetMultilabelCriterion(**train_cfg)
 
