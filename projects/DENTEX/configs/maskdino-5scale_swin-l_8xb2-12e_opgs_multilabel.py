@@ -63,5 +63,6 @@ model = dict(
     ),
     panoptic_fusion_head=dict(num_things_classes=len(classes), num_stuff_classes=0),
 )
+# load_from = 'work_dirs/opgs_fold_enumeration_1/epoch_140.pth'
 
 work_dir = f'work_dirs/opgs_fold{fold}'

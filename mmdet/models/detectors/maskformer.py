@@ -61,6 +61,11 @@ class MaskFormer(SingleStageDetector):
         """
         x = self.extract_feat(batch_inputs)
         losses = self.panoptic_head.loss(x, batch_data_samples)
+
+        import torch
+        for _, x_ in losses.items():
+            if torch.any(torch.isnan(x_) | torch.isinf(x_)):
+                k = 3
         return losses
 
     def predict(self,

@@ -406,6 +406,7 @@ class SetCriterion(nn.Module):
             if self.dn == "seg":
                 l_dict['loss_mask_dn'] = torch.as_tensor(0.).to('cuda')
                 l_dict['loss_dice_dn'] = torch.as_tensor(0.).to('cuda')
+                l_dict['loss_tversky_dn'] = torch.as_tensor(0.).to('cuda')
             losses.update(l_dict)
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
@@ -437,6 +438,7 @@ class SetCriterion(nn.Module):
                         if self.dn == "seg":
                             l_dict[f'loss_mask_dn_{i}'] = torch.as_tensor(0.).to('cuda')
                             l_dict[f'loss_dice_dn_{i}'] = torch.as_tensor(0.).to('cuda')
+                            l_dict[f'loss_tversky_dn_{i}'] = torch.as_tensor(0.).to('cuda')
                         losses.update(l_dict)
         # interm_outputs loss
         if 'interm_outputs' in outputs:

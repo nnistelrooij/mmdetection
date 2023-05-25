@@ -33,6 +33,10 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         self.criterion = SetMultilabelCriterion(**train_cfg)
 
     def loss(self, feats, batch_data_samples):
+        if torch.any(torch.isnan(self.predictor.attributes_embed.weight)):
+            k = 3
+
+
         targets = self.prepare_targets(batch_data_samples)
         outputs, mask_dict = self(feats, mask=None, targets=targets)  # TODO: deal with key_padding_masks ?
         # bipartite matching-based loss
@@ -44,6 +48,10 @@ class MaskDINOMultilabelHead(MaskDINOHead):
             else:
                 # remove this loss if not specified in `weight_dict`
                 losses.pop(k)
+        
+        for _, x_ in losses.items():
+            if torch.any(torch.isnan(x_) | torch.isinf(x_)):
+                k = 3
 
         return losses
 

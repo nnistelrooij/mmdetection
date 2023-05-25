@@ -1,11 +1,50 @@
 import copy
 
 import torch
+import torch.nn.functional as F
 
 from projects.MaskDINO.maskdino.criterion import (
     SetCriterion,
+    calculate_uncertainty,
+    dice_loss_jit,
+    get_uncertain_point_coords_with_randomness,
+    nested_tensor_from_tensor_list,
+    point_sample,
+    sigmoid_ce_loss_jit,
     sigmoid_focal_loss,
 )
+
+
+def tversky_focal_loss(
+    inputs,
+    targets,
+    num_masks: float,
+    alpha: float=0.7,
+    beta: float=0.3,
+    gamma: float=4 / 3,
+):
+    inputs = inputs.sigmoid()
+    inputs = inputs.flatten(1)
+    numerator = (inputs * targets).sum(-1)
+    denominator = (
+        numerator +
+        alpha * ((1 - inputs) * targets).sum(-1) +
+        beta * (inputs * (1 - targets)).sum(-1)
+    )
+    loss = 1 - (numerator + 1) / (denominator + 1)
+    loss = loss ** (1 / gamma)
+    loss = loss.sum() / num_masks
+
+    assert not torch.isinf(loss)
+    assert not torch.isnan(loss)
+
+    return loss
+
+
+
+tversky_focal_loss_jit = torch.jit.script(
+    tversky_focal_loss
+)  # type: torch.jit.ScriptModule
 
 
 class SetMultilabelCriterion(SetCriterion):
@@ -18,6 +57,7 @@ class SetMultilabelCriterion(SetCriterion):
     def __init__(
         self,
         attributes_weight=8.0,
+        tversky_weight=5.0,
         *args,
         **kwargs
     ):
@@ -35,6 +75,11 @@ class SetMultilabelCriterion(SetCriterion):
             k.replace('ce', 'bces'): attributes_weight
             for k in self.weight_dict
             if 'loss_ce' in k
+        })
+        self.weight_dict.update({
+            k.replace('dice', 'tversky'): tversky_weight
+            for k in self.weight_dict
+            if 'loss_dice' in k
         })
         self.losses.append('multilabels')
         self.dn_losses.append('multilabels')
@@ -54,6 +99,59 @@ class SetMultilabelCriterion(SetCriterion):
         loss_ce = sigmoid_focal_loss(src_logits, target_attributes, num_boxes, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
         losses = {'loss_bces': loss_ce}
 
+        return losses
+    
+    def loss_masks(self, outputs, targets, indices, num_masks):
+        """Compute the losses related to the masks: the focal loss and the dice loss.
+        targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
+        """
+        assert "pred_masks" in outputs
+
+        src_idx = self._get_src_permutation_idx(indices)
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        src_masks = outputs["pred_masks"]
+        src_masks = src_masks[src_idx]
+        masks = [t["masks"] for t in targets]
+        # TODO use valid to mask invalid areas due to padding in loss
+        target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
+        target_masks = target_masks.to(src_masks)
+        target_masks = target_masks[tgt_idx]
+
+        # No need to upsample predictions as we are using normalized coordinates :)
+        # N x 1 x H x W
+        src_masks = src_masks[:, None]
+        target_masks = target_masks[:, None]
+
+        with torch.no_grad():
+            # sample point_coords
+            point_coords = get_uncertain_point_coords_with_randomness(
+                src_masks,
+                lambda logits: calculate_uncertainty(logits),
+                self.num_points,
+                self.oversample_ratio,
+                self.importance_sample_ratio,
+            )
+            # get gt labels
+            point_labels = point_sample(
+                target_masks,
+                point_coords,
+                align_corners=False,
+            ).squeeze(1)
+
+        point_logits = point_sample(
+            src_masks,
+            point_coords,
+            align_corners=False,
+        ).squeeze(1)
+
+        losses = {
+            "loss_mask": sigmoid_ce_loss_jit(point_logits, point_labels, num_masks),
+            "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
+            "loss_tversky": tversky_focal_loss(point_logits, point_labels, num_masks),
+        }
+
+        del src_masks
+        del target_masks
         return losses
 
     def get_loss(self, loss, outputs, targets, indices, num_masks):

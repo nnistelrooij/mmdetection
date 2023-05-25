@@ -1,4 +1,5 @@
-_base_ = '/home/mkaailab/Documents/DENTEX/dentex/mmdetection/projects/MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
+# _base_ = '/home/mkaailab/Documents/DENTEX/dentex/mmdetection/projects/MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
+_base_ = '../../MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
 
 custom_imports = dict(
     imports=[
@@ -131,7 +132,7 @@ default_hooks = dict(
     ),
     visualization=dict(
         draw=True,
-        interval=5,
+        interval=1,
     ),
 )
 
@@ -139,7 +140,8 @@ visualizer = dict(
     type='MultilabelDetLocalVisualizer',
     vis_backends=[
         dict(type='LocalVisBackend'),
-        dict(type='TensorboardVisBackend'),
-    ])
+        dict(type='SparseTensorboardVisBackend'),
+    ],
+)
 
-auto_scale_lr = dict(enable=True)
+load_from = 'checkpoints/maskdino_mmdet.pth'
