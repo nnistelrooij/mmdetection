@@ -94,4 +94,5 @@ class CocoMultilabelDataset(CocoDataset):
 
             instances.append(instance)
         data_info['instances'] = instances
+        
         return data_info

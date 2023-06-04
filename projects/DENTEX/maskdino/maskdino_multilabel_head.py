@@ -25,11 +25,16 @@ class MaskDINOMultilabelHead(MaskDINOHead):
     ):
         num_attributes = decoder.pop('num_attributes')
         enable_multilabel = decoder.pop('enable_multilabel')
+        hnm_samples = train_cfg.pop('hnm_samples')
+        use_fed_loss = train_cfg.pop('use_fed_loss')
         super().__init__(decoder=decoder, train_cfg=train_cfg, *args, **kwargs)
 
         decoder['num_attributes'] = num_attributes
         decoder['enable_multilabel'] = enable_multilabel
         self.predictor = MaskDINOMultilabelDecoder(**decoder)
+
+        train_cfg['hnm_samples'] = hnm_samples
+        train_cfg['use_fed_loss'] = use_fed_loss
         self.criterion = SetMultilabelCriterion(**train_cfg)
 
     def loss(self, feats, batch_data_samples):

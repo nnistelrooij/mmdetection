@@ -26,6 +26,7 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
                  test_cfg: OptConfigType = None,
                  loss_panoptic: OptConfigType = None,  # TODO: not used ?
                  init_cfg: OptMultiConfig = None,
+                 enable_multilabel: bool=False,
                  **kwargs):
         super().__init__(
             num_things_classes=num_things_classes,
@@ -34,6 +35,8 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
             loss_panoptic=loss_panoptic,
             init_cfg=init_cfg,
             **kwargs)
+        
+        self.enable_multilabel = enable_multilabel
 
     def predict(self,
                 mask_cls_results: Tensor,
@@ -122,19 +125,49 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         # shape (num_queries, num_class)
         scores = mask_cls.sigmoid()  # TODO: modify MaskFormerFusionHead to add an arg use_sigmoid  # TODO: difference
         scores_per_image, top_indices = scores.flatten(0, 1).topk(max_per_image, sorted=False)  # TODO：why ？
-        # shape (num_queries * num_class)
-        labels = torch.arange(self.num_classes, device=mask_cls.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)  # TODO：why ？
-        labels_per_image = labels[top_indices]
+        
+        if self.enable_multilabel:
+            scores = mask_attributes.sigmoid()
+            scores_per_image, top_indices = scores.flatten(0, 1).topk(max_per_image, sorted=False)  # TODO：why ？
 
-        query_indices = top_indices // self.num_classes  # TODO：why ？
+            attributes = torch.arange(scores.shape[1], device=mask_cls.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)  # TODO：why ？
+            attributes_per_image = attributes[top_indices]
+        else:
+            # shape (num_queries * num_class)
+            labels = torch.arange(self.num_classes, device=mask_cls.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)  # TODO：why ？
+            labels_per_image = labels[top_indices]
+
+        query_indices = top_indices // scores.shape[1]  # TODO：why ？
         mask_pred = mask_pred[query_indices]
         mask_box = mask_box[query_indices] if mask_box is not None else None  # TODO: difference
-        mask_attributes = mask_attributes[query_indices]
+
+        if self.enable_multilabel:
+            mask_cls = mask_cls[query_indices]
+            labels_per_image = mask_cls.argmax(-1)
+
+            _, idx, counts = torch.unique(query_indices, sorted=True, return_inverse=True, return_counts=True)
+            _, ind_sorted = torch.sort(idx, stable=True)
+            cum_sum = counts.cumsum(0)
+            cum_sum = torch.cat((torch.tensor([0], device=cum_sum.device), cum_sum[:-1]))
+            unique_indices = ind_sorted[cum_sum]
+
+            mask_pred = mask_pred[unique_indices]
+            mask_box = mask_box[unique_indices]
+            scores_per_image = scores_per_image[unique_indices]
+            labels_per_image = labels_per_image[unique_indices]
+
+            attributes_per_image = torch.zeros(scores.shape[1], device=mask_cls.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)  # TODO：why ？
+            attributes_per_image[top_indices] = 1
+            attributes_per_image = attributes_per_image.reshape(-1, scores.shape[1])
+            attributes_per_image = attributes_per_image[query_indices]
+            attributes_per_image = attributes_per_image[unique_indices]
 
         # extract things  # TODO： if self.panoptic_on ?
         is_thing = labels_per_image < self.num_things_classes
         scores_per_image = scores_per_image[is_thing]
         labels_per_image = labels_per_image[is_thing]
+        if self.enable_multilabel:
+            attributes_per_image = attributes_per_image[is_thing]
         mask_pred = mask_pred[is_thing]
         mask_box = mask_box[is_thing] if mask_box is not None else None  # TODO: difference
 
@@ -145,12 +178,14 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         det_scores = scores_per_image * mask_scores_per_image  # TODO：why ？
         mask_pred_binary = mask_pred_binary.bool()
         bboxes = mask_box if mask_box is not None else mask2bbox(mask_pred_binary)  # TODO: difference
-        mask_attributes_onehot = mask_attributes > 0
 
         results = InstanceData()
         results.bboxes = bboxes
         results.labels = labels_per_image
         results.scores = det_scores if not focus_on_box else 1.0
         results.masks = mask_pred_binary
-        results.multilabels = mask_attributes_onehot
+        if self.enable_multilabel:
+            results.multilabels = attributes_per_image
+        else:
+            results.multilabels = mask_attributes[query_indices] > 0
         return results

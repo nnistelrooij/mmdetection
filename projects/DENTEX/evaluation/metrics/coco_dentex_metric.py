@@ -5,6 +5,7 @@ import tempfile
 from typing import Dict, List, Sequence
 
 from mmengine.fileio import dump
+from mmengine.logging import MMLogger
 import numpy as np
 
 from mmdet.datasets.api_wrappers import COCO
@@ -15,26 +16,29 @@ from mmdet.evaluation import CocoMetric
 @METRICS.register_module()
 class CocoDENTEXMetric(CocoMetric):
 
-    QUADRANT_NAME2CAT = {
-        f'{q}{e}': {'id': q - 1, 'name': str(q)}
-        for q in range(1, 5) for e in range(1, 9)
-    }
-    ENUMERATION_NAME2CAT = {
-        f'{q}{e}': {'id': e - 1, 'name': str(e)}
-        for q in range(1, 5) for e in range(1, 9)
-    }
-    DIAGNOSIS_NAME2CAT = {
-        diag: {'id': i, 'name': diag} for i, diag in enumerate(
-            ['Caries', 'Deep Caries', 'Impacted', 'Periapical Lesion']
-        )
+    CAT_MAPS = {
+        'quadrants':{
+            f'{q}{e}': {'id': q - 1, 'name': str(q)}
+            for q in range(1, 5) for e in range(1, 9)
+        },
+        'enumeration': {
+            f'{q}{e}': {'id': e - 1, 'name': str(e)}
+            for q in range(1, 5) for e in range(1, 9)
+        },
+        'diagnosis': {
+            diag: {'id': i, 'name': diag} for i, diag in enumerate(
+                ['Caries', 'Deep Caries', 'Impacted', 'Periapical Lesion']
+            )
+        },
     }
 
     def __init__(
         self,
+        proposal_nums: Sequence[int]=(1, 10, 100),
         *args,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(proposal_nums=proposal_nums, *args, **kwargs)
 
         self.metric_items = [
             'mAP', 'mAP_50', 'mAP_75', 'AR@100',
@@ -200,8 +204,12 @@ class CocoDENTEXMetric(CocoMetric):
     def compute_metrics_single(
         self,
         results: list,
-        cat_map: Dict[str, Dict],
+        cat_map: str,
     ) -> Dict[str, float]:
+        logger = MMLogger.get_current_instance()
+        
+        task = cat_map
+        cat_map = self.CAT_MAPS[cat_map]
         task_metrics = {}
         for exclude_normal in [False, True]:
             results = copy.deepcopy(results)
@@ -214,6 +222,9 @@ class CocoDENTEXMetric(CocoMetric):
             self._coco_api = coco
             self.cat_ids = np.unique([c['id'] for c in cat_map.values()])
 
+            logger.info('Evaluating {}, {} normal teeth'.format(
+                task, 'excluding' if exclude_normal else 'including',
+            ))
             metrics = super().compute_metrics(zip(gts, preds))
 
             task_metrics.update({
@@ -227,11 +238,7 @@ class CocoDENTEXMetric(CocoMetric):
 
     def compute_metrics(self, results: list) -> Dict[str, float]:
         metrics = {}
-        for cat_map in [
-            self.QUADRANT_NAME2CAT,
-            self.ENUMERATION_NAME2CAT,
-            self.DIAGNOSIS_NAME2CAT,
-        ]:
+        for cat_map in self.CAT_MAPS:
             task_metrics = self.compute_metrics_single(results, cat_map)
 
             for metric, value in task_metrics.items():

@@ -3,13 +3,15 @@ _base_ = '../../MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
 
 custom_imports = dict(
     imports=[
-        'projects.DENTEX.datasets.coco_multilabel',
+        'projects.DENTEX.datasets',
+        'projects.DENTEX.datasets.dataset_wrappers',
         'projects.DENTEX.datasets.transforms.loading',
         'projects.DENTEX.datasets.transforms.formatting',
         'projects.DENTEX.datasets.transforms.transforms',
         'projects.DENTEX.evaluation',
         'projects.DENTEX.maskdino',
         'projects.DENTEX.visualization',
+        'projects.DENTEX.hooks',
     ],
     allow_failed_imports=False,
 )
@@ -59,16 +61,21 @@ train_pipeline = [
 train_dataloader = dict(
     dataset=dict(
         _delete_=True, 
-        type='MultiImageMixDataset',
+        type='InstanceBalancedDataset',
+        oversample_thr=0.1,
         dataset=dict(
-            type=dataset_type,
-            filter_cfg=dict(filter_empty_gt=False),
-            pipeline=[
-                dict(type='LoadImageFromFile', backend_args=None),
-                dict(type='LoadMultilabelAnnotations', with_bbox=True, with_mask=True),
-            ],
+            type='MultiImageMixDataset',
+            dataset=dict(
+                type=dataset_type,
+                filter_cfg=dict(filter_empty_gt=False),
+                serialize_data=False,
+                pipeline=[
+                    dict(type='LoadImageFromFile', backend_args=None),
+                    dict(type='LoadMultilabelAnnotations', with_bbox=True, with_mask=True),
+                ],
+            ),
+            pipeline=train_pipeline,
         ),
-        pipeline=train_pipeline,
     ),
 )
 
@@ -95,7 +102,7 @@ val_pipeline=[
 val_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 test_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 
-max_epochs = 500
+max_epochs = 200
 train_cfg = dict(
     _delete_=True,
     type='EpochBasedTrainLoop',
@@ -116,6 +123,7 @@ param_scheduler = [
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
+custom_hooks = [dict(type='ClassCountsHook')]
 model = dict(
     type='MaskDINOMultilabel',
     test_cfg=dict(panoptic_on=False, instance_on=True, max_per_image=100),
@@ -137,7 +145,7 @@ default_hooks = dict(
 )
 
 visualizer = dict(
-    type='MultilabelDetLocalVisualizer',
+    type='DetLocalVisualizer',
     vis_backends=[
         dict(type='LocalVisBackend'),
         dict(type='SparseTensorboardVisBackend'),
@@ -145,3 +153,4 @@ visualizer = dict(
 )
 
 load_from = 'checkpoints/maskdino_mmdet.pth'
+load_from = 'work_dirs/opgs_fold_enumeration_0/epoch_50.pth'
