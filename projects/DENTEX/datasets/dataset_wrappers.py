@@ -21,16 +21,19 @@ class InstanceBalancedDataset(ClassBalancedDataset):
             if not instances:
                 continue
             
-            attributes = np.stack(ann['bbox_multilabel'] for ann in instances)
+            attributes = np.stack([ann['bbox_multilabel'] for ann in instances])
             attributes = attributes[np.any(attributes, axis=-1)]
 
+            cat_ids = set()
             for multilabel in attributes:
-                for cat_id in multilabel.nonzero()[0]:
-                    bbox_freq[cat_id] += 1
-            for cat_id in np.any(attributes, axis=0).nonzero()[0]:
-                image_freq[cat_id] += 1
+                cat_id = sum(2**i * label for i, label in enumerate(multilabel))
+                bbox_freq[cat_id] += 1
+                num_bboxes += 1
 
-            num_bboxes += attributes.sum()
+                cat_ids.add(cat_id)
+
+            for cat_id in cat_ids:
+                image_freq[cat_id] += 1
 
         for k, v in image_freq.items():
             image_freq[k] = v / num_images
@@ -49,20 +52,22 @@ class InstanceBalancedDataset(ClassBalancedDataset):
         for idx in range(num_images):
             instances = self.dataset.get_data_info(idx)['instances']
             if not instances:
-                repeat_factors.append(1)
+                repeat_factors.append(1.0)
                 continue
             
-            attributes = np.stack(ann['bbox_multilabel'] for ann in instances)
+            attributes = np.stack([ann['bbox_multilabel'] for ann in instances])
             attributes = attributes[np.any(attributes, axis=-1)]
-            attributes = np.any(attributes, axis=0)
 
             if not np.any(attributes):
-                repeat_factors.append(1)
+                repeat_factors.append(1.0)
                 continue
+            
+            cat_ids = set()
+            for multilabel in attributes:
+                cat_id = sum(2**i * label for i, label in enumerate(multilabel))
+                cat_ids.add(cat_id)
 
-            repeat_factor = max(
-                {category_repeat[cat_id]
-                 for cat_id in attributes.nonzero()[0]})
+            repeat_factor = max(category_repeat[cat_id] for cat_id in cat_ids)
             repeat_factors.append(repeat_factor)
 
         return repeat_factors

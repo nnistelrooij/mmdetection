@@ -41,7 +41,7 @@ class CocoDENTEXMetric(CocoMetric):
         super().__init__(proposal_nums=proposal_nums, *args, **kwargs)
 
         self.metric_items = [
-            'mAP', 'mAP_50', 'mAP_75', 'AR@100',
+            'mAP', 'mAP_50', 'mAP_75', 'AR@1000',  # AR@1000 == AR@100
         ]
     
     def process(self, data_batch: dict, data_samples: Sequence[dict]) -> None:
@@ -55,22 +55,20 @@ class CocoDENTEXMetric(CocoMetric):
         self,
         ann,
         cat_map: Dict[str, Dict],
-        exclude_normal: bool,
+        split_diagnoses: bool,
     ) -> List[int]:
+        cat_name = self._coco_api.cats[ann['category_id']]['name']
+        if not split_diagnoses and cat_name in cat_map:
+            return [cat_map[cat_name]['id']]            
+        
         if (
             'extra' not in ann or
-            'attributes' not in ann['extra'] or
-            len(ann['extra']['attributes']) == 0
+            'attributes' not in ann['extra']
         ):
-            if exclude_normal:
-                return []
-            
-            cat_name = self._coco_api.cats[ann['category_id']]['name']
-            return [cat_map[cat_name]['id']] if cat_name in cat_map else []
+            return []
 
         cat_ids = []
         for attr in ann['extra']['attributes']:
-            cat_name = self._coco_api.cats[ann['category_id']]['name']
             if cat_name not in cat_map:
                 cat_name = attr
 
@@ -83,36 +81,36 @@ class CocoDENTEXMetric(CocoMetric):
         label: int,
         multilabel: List[int],
         cat_map: Dict[str, Dict],
-        exclude_normal: bool,
+        split_diagnoses: bool,
     ) -> List[int]:
+        cat_name = self.dataset_meta['classes'][label]
+        if not split_diagnoses and cat_name in cat_map:
+            return [cat_map[cat_name]['id']]
+        
+
         if not np.any(multilabel):
-            if exclude_normal:
-                return []
-            
-            cat_name = self.dataset_meta['classes'][label]
-            return [cat_map[cat_name]['id']] if cat_name in cat_map else []
+            return []
 
         cat_ids = []
         for attr_idx in np.nonzero(multilabel)[0]:
-            cat_name = self.dataset_meta['classes'][label]
             if cat_name not in cat_map:
                 cat_name = self.dataset_meta['attributes'][attr_idx]
 
             cat_ids.append(cat_map[cat_name]['id'])
 
-        return cat_ids        
+        return cat_ids
     
     def pred2cats(
         self,
         pred,
         cat_map: Dict[str, Dict],
-        exclude_normal: bool
+        split_diagnoses: bool
     ) -> List[int]:
         bboxes, scores, labels, masks = [], [], [], []
         for bbox, score, label, mask, multilabel in zip(*(pred[key] for key in [
             'bboxes', 'scores', 'labels', 'masks', 'multilabels',
         ])):
-            for cat_id in self.labels2cats(label, multilabel, cat_map, exclude_normal):
+            for cat_id in self.labels2cats(label, multilabel, cat_map, split_diagnoses):
                 bboxes.append(bbox)
                 scores.append(score)
                 labels.append(cat_id)
@@ -150,7 +148,7 @@ class CocoDENTEXMetric(CocoMetric):
         self,
         gts: list,
         cat_map: Dict[str, Dict],
-        exclude_normal: bool,
+        split_diagnoses: bool,
     ) -> COCO:
         gt_dicts = []
         for gt_dict in gts:
@@ -168,13 +166,13 @@ class CocoDENTEXMetric(CocoMetric):
 
                 ann['mask'] = ann['segmentation']
 
-                cat_ids = self.ann2cats(ann, cat_map, exclude_normal)
+                cat_ids = self.ann2cats(ann, cat_map, split_diagnoses)
                 for cat_id in cat_ids:
                     ann = copy.deepcopy(ann)
                     ann['bbox_label'] = cat_id
                     gt_dict['anns'].append(ann)
 
-            gt_dicts.append(gt_dict)       
+            gt_dicts.append(gt_dict)
 
         tmp_dir = None
         if self.outfile_prefix is None:
@@ -192,11 +190,11 @@ class CocoDENTEXMetric(CocoMetric):
         self,
         preds: list,
         cat_map: Dict[str, Dict],
-        exclude_normal: bool,
+        split_diagnoses: bool,
     ) -> list:
         preds_list = []
         for pred in preds:
-            pred = self.pred2cats(pred, cat_map, exclude_normal)
+            pred = self.pred2cats(pred, cat_map, split_diagnoses)
             preds_list.append(pred)
 
         return preds_list
@@ -211,24 +209,27 @@ class CocoDENTEXMetric(CocoMetric):
         task = cat_map
         cat_map = self.CAT_MAPS[cat_map]
         task_metrics = {}
-        for exclude_normal in [False, True]:
+        for split_diagnoses in [False, True]:
+            if task == 'diagnosis' and not split_diagnoses:
+                continue
+
             results = copy.deepcopy(results)
             gts, preds = zip(*results)
 
-            coco = self.prepare_gts(gts, cat_map, exclude_normal)
-            preds = self.prepare_preds(preds, cat_map, exclude_normal)
+            coco = self.prepare_gts(gts, cat_map, split_diagnoses)
+            preds = self.prepare_preds(preds, cat_map, split_diagnoses)
 
             self._orig_coco_api = self._coco_api
             self._coco_api = coco
             self.cat_ids = np.unique([c['id'] for c in cat_map.values()])
 
-            logger.info('Evaluating {}, {} normal teeth'.format(
-                task, 'excluding' if exclude_normal else 'including',
+            logger.info('Evaluating {}, {} splitting diagnoses'.format(
+                task, '' if split_diagnoses else 'not',
             ))
             metrics = super().compute_metrics(zip(gts, preds))
 
             task_metrics.update({
-                k.replace('_', f'_exclude={exclude_normal}_', 1): v
+                k.replace('_', f'_split-diagnoses={split_diagnoses}_', 1): v
                 for k, v in metrics.items()
             })
 
@@ -244,5 +245,5 @@ class CocoDENTEXMetric(CocoMetric):
             for metric, value in task_metrics.items():
                 metric_name = '_'.join(metric.split('_')[:2])
                 metrics.setdefault(metric_name, []).append(value)
-            
+
         return {metric: np.mean(values) for metric, values in metrics.items()}

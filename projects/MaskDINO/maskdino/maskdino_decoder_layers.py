@@ -110,7 +110,7 @@ class MaskDINODecoder(nn.Module):
                         hidden_dim,
                         kernel_size=1,
                         act_cfg=None))
-                weight_init.c2_xavier_fill(self.input_proj[-1])
+                weight_init.c2_xavier_fill(self.input_proj[-1].conv)
             else:
                 self.input_proj.append(nn.Sequential())
         self.num_classes=num_classes

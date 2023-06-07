@@ -325,7 +325,7 @@ class SetMultilabelCriterion(SetCriterion):
             'boxes': self.loss_boxes_panoptic if self.panoptic_on else self.loss_boxes,
         }
 
-        indices = self.remove_normal_teeth(targets, indices)
+        # indices = self.remove_normal_teeth(targets, indices)
         # if self.hnm_samples > 0 and loss != 'labels':
         #     indices = self.hard_negative_mining(outputs, targets, indices, num_masks)
 

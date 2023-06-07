@@ -1,5 +1,5 @@
-# _base_ = '/home/mkaailab/Documents/DENTEX/dentex/mmdetection/projects/MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
 _base_ = '../../MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
+# _base_ = './maskdino-5scale_swin-l_8xb2-12e_coco.py'
 
 custom_imports = dict(
     imports=[
@@ -21,6 +21,7 @@ dataset_type = 'CocoMultilabelDataset'
 train_pipeline = [
     # dict(type='Mosaic', img_scale=(1024, 1024), pad_val=114.0),
     dict(type='RandomOPGFlip', prob=0.5),
+    dict(type='RandomToothFlip', prob=0.5),
     dict(
         type='RandomChoice',
         transforms=[[{
@@ -107,7 +108,7 @@ train_cfg = dict(
     _delete_=True,
     type='EpochBasedTrainLoop',
     max_epochs=max_epochs,
-    val_interval=5,
+    val_interval=1,
 )
 param_scheduler = [
     dict(
@@ -133,14 +134,14 @@ model = dict(
 
 default_hooks = dict(
     checkpoint=dict(
-        interval=5,
+        interval=1,
         by_epoch=True,
         save_best='coco/segm_exclude=False',
         rule='greater',
     ),
     visualization=dict(
         draw=True,
-        interval=1,
+        interval=20,
     ),
 )
 
@@ -152,5 +153,5 @@ visualizer = dict(
     ],
 )
 
-load_from = 'checkpoints/maskdino_mmdet.pth'
-load_from = 'work_dirs/opgs_fold_enumeration_0/epoch_50.pth'
+# load_from = 'checkpoints/maskdino_mmdet.pth'
+# load_from = 'work_dirs/opgs_fold_enumeration_0/epoch_50.pth'
