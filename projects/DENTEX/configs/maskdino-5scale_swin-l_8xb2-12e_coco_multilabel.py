@@ -103,7 +103,7 @@ val_pipeline=[
 val_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 test_dataloader = dict(dataset=dict(type=dataset_type, pipeline=val_pipeline))
 
-max_epochs = 200
+max_epochs = 50
 train_cfg = dict(
     _delete_=True,
     type='EpochBasedTrainLoop',

@@ -223,7 +223,7 @@ class CocoDENTEXMetric(CocoMetric):
             self._coco_api = coco
             self.cat_ids = np.unique([c['id'] for c in cat_map.values()])
 
-            logger.info('Evaluating {}, {} splitting diagnoses'.format(
+            logger.info('Evaluating {}, {}splitting diagnoses'.format(
                 task, '' if split_diagnoses else 'not',
             ))
             metrics = super().compute_metrics(zip(gts, preds))
