@@ -136,6 +136,7 @@ default_hooks = dict(
     checkpoint=dict(
         interval=1,
         by_epoch=True,
+        max_keep_ckpts=1,
         save_best='coco/segm_exclude=False',
         rule='greater',
     ),
