@@ -29,7 +29,7 @@ class RandomToothFlip(BaseTransform):
         *args,
         **kwargs,
     ) -> None:
-        super().__init__(*args, *kwargs)
+        super().__init__(*args, **kwargs)
 
         self.prob = prob
 

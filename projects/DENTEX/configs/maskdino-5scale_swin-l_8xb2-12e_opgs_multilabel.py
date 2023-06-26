@@ -1,8 +1,8 @@
 _base_ = './maskdino-5scale_swin-l_8xb2-12e_coco_multilabel.py'
 
 data_root = '/home/mkaailab/.darwin/datasets/mucoaid/dentexv2/'
-export = 'fdi-checkedv2'
-fold = '_unique_diagnosis_0'
+export = 'external'
+fold = '_all_clean_0'
 multilabel = False
 data_prefix = dict(img=data_root + 'images')
 ann_prefix = data_root + f'releases/{export}/other_formats/coco/'

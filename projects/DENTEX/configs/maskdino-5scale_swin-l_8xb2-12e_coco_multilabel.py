@@ -141,7 +141,7 @@ default_hooks = dict(
         rule='greater',
     ),
     visualization=dict(
-        draw=True,
+        draw=False,
         interval=20,
     ),
 )
