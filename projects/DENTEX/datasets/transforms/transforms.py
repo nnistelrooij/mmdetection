@@ -1,4 +1,3 @@
-from jaxtyping import Array, Int
 import numpy as np
 import torch
 
@@ -38,7 +37,7 @@ class RandomToothFlip(BaseTransform):
         results: dict,
         tooth_idx: int,
         middle_idx: int,
-    ) -> Int[Array, 'H W 3']:
+    ):
         middle_bbox = results['gt_bboxes'].tensor[middle_idx].int()
 
         #image cut at upper right bbox of central right incisor: half_flipped_image
@@ -79,7 +78,7 @@ class RandomToothFlip(BaseTransform):
     def _add_flipped_instance(
         results: dict,
         tooth_idx: int,
-        flipped_instance: Int[Array, 'H W 3'],
+        flipped_instance,
     ):
         image_with_flipped_instance = np.where(flipped_instance == 0, results['img'], flipped_instance)
         results['img'] = image_with_flipped_instance

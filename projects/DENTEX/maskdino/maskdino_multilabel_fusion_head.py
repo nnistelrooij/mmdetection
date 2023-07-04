@@ -113,6 +113,8 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
                     (num_instance, )
                 - labels (Tensor): Labels of bboxes, has a shape
                     (num_instances, ).
+                - logits (Tensor): Classification logits of bboxes, has
+                    a shape (num_instances, cls_out_channels).
                 - bboxes (Tensor): Has a shape (num_instances, 4),
                     the last dimension 4 arrange as (x1, y1, x2, y2).
                 - masks (Tensor): Has a shape (num_instances, H, W).
@@ -138,6 +140,7 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
             labels_per_image = labels[top_indices]
 
         query_indices = top_indices // scores.shape[1]  # TODO：why ？
+        mask_cls = mask_cls[query_indices]
         mask_pred = mask_pred[query_indices]
         mask_box = mask_box[query_indices] if mask_box is not None else None  # TODO: difference
 
@@ -168,6 +171,7 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         labels_per_image = labels_per_image[is_thing]
         if self.enable_multilabel:
             attributes_per_image = attributes_per_image[is_thing]
+        mask_cls = mask_cls[is_thing]
         mask_pred = mask_pred[is_thing]
         mask_box = mask_box[is_thing] if mask_box is not None else None  # TODO: difference
 
@@ -182,10 +186,12 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         results = InstanceData()
         results.bboxes = bboxes
         results.labels = labels_per_image
+        results.logits = mask_cls
         results.scores = det_scores if not focus_on_box else 1.0
         results.masks = mask_pred_binary
         if self.enable_multilabel:
             results.multilabels = attributes_per_image
         else:
             results.multilabels = mask_attributes[query_indices] > 0
+
         return results
