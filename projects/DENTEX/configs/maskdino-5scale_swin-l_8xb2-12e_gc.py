@@ -9,4 +9,11 @@ test_dataloader = dict(
         data_root='/output',
     ),
 )
-test_evaluator = []
+test_evaluator = dict(
+    _delete_=True,
+    type='DumpNumpyDetResults',
+    out_file_path='detection.pkl',
+)
+
+# test_evaluator = []
+log_level = 'WARN'

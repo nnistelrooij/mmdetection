@@ -57,7 +57,6 @@ test_evaluator = dict(
     # ann_file=data_root + 'annotations/instances_val2017_onesample_139.json',  # TODO: delete before merging
     metric=['bbox', 'segm'],
 )
-test_evaluator = []
 
 model = dict(
     train_cfg=dict(num_classes=len(classes), hnm_samples=2, use_fed_loss=False),
