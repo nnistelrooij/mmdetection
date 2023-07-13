@@ -76,6 +76,14 @@ model = dict(
     ),
 )
 
+tta_model = dict(
+    type='DENTEXTTAModel',
+    tta_cfg=dict(
+        nms=dict(type='nms', iou_threshold=0.5),
+        max_per_img=100,
+    ),
+)
+
 load_from = 'checkpoints/maskdino_mmdet.pth'
 # load_from = 'checkpoints/maskdino_swin_mmdet.pth'
 
