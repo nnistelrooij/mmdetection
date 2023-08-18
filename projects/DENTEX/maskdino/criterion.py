@@ -76,7 +76,7 @@ class SetMultilabelCriterion(SetCriterion):
 
     def __init__(
         self,
-        attributes_weight=8.0,
+        attributes_weight=4.0,
         tversky_weight=5.0,
         hnm_samples: int=-1,
         use_fed_loss: bool=True,
@@ -108,6 +108,11 @@ class SetMultilabelCriterion(SetCriterion):
 
         self.hnm_samples = hnm_samples
         self.use_fed_loss = use_fed_loss
+
+    def forward(self, outputs, targets, mask_dict=None):
+        # targets = self.split_diagnoses(targets)
+
+        return super().forward(outputs, targets, mask_dict)
 
     def set_federated_class_weights(
         self,
@@ -166,7 +171,7 @@ class SetMultilabelCriterion(SetCriterion):
             src_logits = torch.cat([p[J] for p, (J, _) in zip(src_logits, indices)])
             target_classes = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
 
-        target_classes_onehot = torch.zeros(src_logits.shape[0], src_logits.shape[1], src_logits.shape[2] + 1,
+        target_classes_onehot = torch.zeros(*src_logits.shape[:-1], src_logits.shape[-1] + 1,
                 dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
         target_classes_onehot.scatter_(-1, target_classes.unsqueeze(-1), 1)
 
@@ -185,46 +190,40 @@ class SetMultilabelCriterion(SetCriterion):
 
         return losses
     
-    def loss_multilabels(self, outputs, targets, indices, num_boxes, reduction: str='sum', no_object: bool=True):
+    def loss_multilabels(self, outputs, targets, indices, num_boxes, reduction: str='sum', no_object: bool=False):
         """Multi-label classification loss (Asymmetric loss)
         targets dicts must contain the key "multilabels" containing a tensor of dim [nb_target_boxes. nb_attributes]
         """
         assert 'pred_multilabel_logits' in outputs
-
         src_logits = outputs['pred_multilabel_logits']
         num_classes = src_logits.shape[2]
 
         if no_object:
             idx = self._get_src_permutation_idx(indices)
-            target_attributes_o = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
-            target_attributes = torch.zeros(src_logits.shape, dtype=target_attributes_o.dtype, device=src_logits.device)
-            target_attributes[idx] = target_attributes_o.reshape(-1, num_classes)
+            target_classes_o = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
+            target_classes = torch.full(src_logits.shape[:2], num_classes,
+                                        dtype=torch.int64, device=src_logits.device)
+            target_classes[idx] = target_classes_o
         else:
             src_logits = torch.cat([p[J] for p, (J, _) in zip(src_logits, indices)])
+            target_classes = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
 
-            target_attributes = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
-
+        target_classes_onehot = torch.zeros(*src_logits.shape[:-1], num_classes + 1,
+                dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
+        target_classes_onehot.scatter_(-1, target_classes.unsqueeze(-1), 1)
 
         if self.use_fed_loss:
-            target_attributes = torch.dstack((
-                target_attributes, ~target_attributes.any(dim=-1),
-            ))
-            non_fed_classes = self.get_federated_classes(target_attributes, self.attribute_weights, num_classes)
-            weights = torch.ones_like(src_logits)
-            weights[..., non_fed_classes] = 0
-            target_attributes = target_attributes[..., :-1]
+            fed_classes = self.get_federated_classes(target_classes_onehot, self.fdi_weights, num_classes)
+            weights = torch.zeros_like(src_logits)
+            weights[..., fed_classes] = 1
         else:
             weights = None
-        
-        target_attributes = target_attributes.float()
-        loss_asl = src_logits.shape[1] * asymmetric_loss(
-            src_logits, target_attributes, num_boxes, weights, reduction=reduction,
-        )        
-        # loss_asl = sigmoid_focal_loss(
-        #     src_logits, target_attributes, num_boxes, alpha=self.focal_alpha, gamma=2, reduction=reduction,
-        # ) * src_logits.shape[1]
 
-        losses = {'loss_bces': loss_asl}
+        target_classes_onehot = target_classes_onehot[..., :-1]
+
+        loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_boxes, weights, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
+
+        losses = {'loss_bces': loss_ce}
 
         return losses
     
@@ -303,17 +302,26 @@ class SetMultilabelCriterion(SetCriterion):
 
         return out
     
-    def remove_normal_teeth(self, targets, indices):
+    def split_diagnoses(self, targets):
         out = []
-        for target, (idxs_i, idxs_j) in zip(targets, indices):
-            keep_mask = torch.any(target['multilabels'], dim=-1).to(idxs_i.device)
+        for target in targets:
+            labels, multilabels, boxes, masks = [], [], [], []
+            for i, j in torch.nonzero(target['multilabels']):
+                multilabel = torch.zeros_like(target['multilabels'][i])
+                multilabel[j] = 1
 
-            if target['labels'].shape[0] == 0 or torch.all(keep_mask):
-                out.append((idxs_i, idxs_j))
-                continue
+                labels.append(target['labels'][i])
+                multilabels.append(multilabel.argmax())
+                boxes.append(target['boxes'][i])
+                masks.append(target['masks'][i])
 
-            keep_mask = keep_mask[idxs_j]
-            out.append((idxs_i[keep_mask], idxs_j[keep_mask]))
+            target = {
+                'labels': torch.stack(labels) if labels else target['labels'][:0],
+                'multilabels': torch.stack(multilabels) if labels else target['labels'][:0],
+                'boxes': torch.stack(boxes) if labels else target['boxes'][:0],
+                'masks': torch.stack(masks) if labels else target['masks'][:0],
+            }            
+            out.append(target)
 
         return out
 
@@ -324,11 +332,12 @@ class SetMultilabelCriterion(SetCriterion):
             'masks': self.loss_masks,
             'boxes': self.loss_boxes_panoptic if self.panoptic_on else self.loss_boxes,
         }
-
-        # indices = self.remove_normal_teeth(targets, indices)
         # if self.hnm_samples > 0 and loss != 'labels':
         #     indices = self.hard_negative_mining(outputs, targets, indices, num_masks)
 
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
+
+        if loss == 'multilabels':
+            return {}
 
         return loss_map[loss](outputs, targets, indices, num_masks)

@@ -77,25 +77,34 @@ class MaskDINOMultilabelHead(MaskDINOHead):
 
         return mask_cls_results, mask_pred_results, mask_box_results, mask_attrs_results
 
-    def prepare_targets(self, batch_data_samples):
+    def prepare_targets(self, batch_data_samples, instances='gt_instances'):
         # h_pad, w_pad = images.tensor.shape[-2:]  # TODO: Here is confusing
         h_pad, w_pad = batch_data_samples[0].batch_input_shape  # TODO: make a check
         new_targets = []
         for data_sample in batch_data_samples:
+            sample_instances = getattr(data_sample, instances)
+
             # pad gt
-            device = data_sample.gt_instances.bboxes.device
+            device = sample_instances.bboxes.device
             h, w = data_sample.img_shape[:2]
             image_size_xyxy = torch.as_tensor([w, h, w, h], dtype=torch.float, device=device)
 
-            gt_masks = torch.from_numpy(data_sample.gt_instances.masks.masks).bool().to(device)
+            if hasattr(sample_instances.masks, 'masks'):
+                gt_masks = torch.from_numpy(sample_instances.masks.masks).bool().to(device)
+            else:
+                gt_masks = sample_instances.masks
+
             padded_masks = torch.zeros((gt_masks.shape[0], h_pad, w_pad), dtype=gt_masks.dtype, device=device)
             padded_masks[:, : gt_masks.shape[1], : gt_masks.shape[2]] = gt_masks
             new_targets.append(
                 {
-                    "labels": data_sample.gt_instances.labels,
+                    "labels": sample_instances.labels,
                     "masks": padded_masks,
-                    "boxes": bbox_xyxy_to_cxcywh(data_sample.gt_instances.bboxes) / image_size_xyxy,
-                    "multilabels": data_sample.gt_instances.multilabels,
+                    "boxes": bbox_xyxy_to_cxcywh(sample_instances.bboxes) / image_size_xyxy,
+                    **(
+                        {"multilabels": sample_instances.multilabels}
+                        if hasattr(sample_instances, 'multilabels') else {}
+                    ),
                 }
             )
 

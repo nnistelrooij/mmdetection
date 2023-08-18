@@ -141,11 +141,11 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
 
         query_indices = top_indices // scores.shape[1]  # TODO：why ？
         mask_cls = mask_cls[query_indices]
+        mask_attributes = mask_attributes[query_indices]
         mask_pred = mask_pred[query_indices]
         mask_box = mask_box[query_indices] if mask_box is not None else None  # TODO: difference
 
         if self.enable_multilabel:
-            mask_cls = mask_cls[query_indices]
             labels_per_image = mask_cls.argmax(-1)
 
             _, idx, counts = torch.unique(query_indices, sorted=True, return_inverse=True, return_counts=True)
@@ -158,6 +158,8 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
             mask_box = mask_box[unique_indices]
             scores_per_image = scores_per_image[unique_indices]
             labels_per_image = labels_per_image[unique_indices]
+            mask_cls = mask_cls[unique_indices]
+            mask_attributes = mask_attributes[unique_indices]
 
             attributes_per_image = torch.zeros(scores.shape[1], device=mask_cls.device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)  # TODO：why ？
             attributes_per_image[top_indices] = 1
@@ -172,6 +174,7 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         if self.enable_multilabel:
             attributes_per_image = attributes_per_image[is_thing]
         mask_cls = mask_cls[is_thing]
+        mask_attributes = mask_attributes[is_thing]
         mask_pred = mask_pred[is_thing]
         mask_box = mask_box[is_thing] if mask_box is not None else None  # TODO: difference
 
@@ -192,6 +195,7 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         if self.enable_multilabel:
             results.multilabels = attributes_per_image
         else:
-            results.multilabels = mask_attributes[query_indices] > 0
+            results.multilabels = mask_attributes > 0
+        results.multilogits = mask_attributes
 
         return results

@@ -80,7 +80,7 @@ class MultilabelDetLocalVisualizer(DetLocalVisualizer):
                     label_text,
                     pos,
                     colors=text_colors[i],
-                    font_sizes=int(26 * scales[i]),
+                    font_sizes=int(24 * scales[i]),
                     bboxes=[{
                         'facecolor': 'black',
                         'alpha': 0.8,

@@ -2,7 +2,7 @@ import copy
 import json
 from pathlib import Path
 import tempfile
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from mmengine.fileio import dump
 from mmengine.logging import MMLogger
@@ -35,6 +35,7 @@ class CocoDENTEXMetric(CocoMetric):
     def __init__(
         self,
         proposal_nums: Sequence[int]=(1, 10, 100),
+        label: Optional[str]=None,
         *args,
         **kwargs,
     ):
@@ -43,6 +44,7 @@ class CocoDENTEXMetric(CocoMetric):
         self.metric_items = [
             'mAP', 'mAP_50', 'mAP_75', 'AR@1000',  # AR@1000 == AR@100
         ]
+        self.label = label
     
     def process(self, data_batch: dict, data_samples: Sequence[dict]) -> None:
         super().process(data_batch, data_samples)
@@ -59,13 +61,19 @@ class CocoDENTEXMetric(CocoMetric):
     ) -> List[int]:
         cat_name = self._coco_api.cats[ann['category_id']]['name']
         if not split_diagnoses and cat_name in cat_map:
-            return [cat_map[cat_name]['id']]            
+            return [cat_map[cat_name]['id']]
         
         if (
             'extra' not in ann or
             'attributes' not in ann['extra']
         ):
             return []
+        
+        if self.label:
+            if cat_name not in cat_map:
+                return [cat_map[self.label]['id']]
+            else:
+                return [cat_map[cat_name]['id']]
 
         cat_ids = []
         for attr in ann['extra']['attributes']:
@@ -90,6 +98,12 @@ class CocoDENTEXMetric(CocoMetric):
 
         if not np.any(multilabel):
             return []
+        
+        if self.label:
+            if cat_name not in cat_map:
+                return [cat_map[self.label]['id']]
+            else:
+                return [cat_map[cat_name]['id']]
 
         cat_ids = []
         for attr_idx in np.nonzero(multilabel)[0]:
@@ -137,12 +151,19 @@ class CocoDENTEXMetric(CocoMetric):
         with open(coco_json_path, 'r') as f:
             coco_json_dict = json.load(f)
 
-        categories = {cat['id']: cat for cat in cat_map.values()}
+        if (
+            self.label is not None and
+            self.label in cat_map
+        ):
+            categories = {cat_map[self.label]['id']: cat_map[self.label]}
+        else:
+            categories = {cat['id']: cat for cat in cat_map.values()}
         coco_json_dict['categories'] = list(categories.values())
 
         dump(coco_json_dict, coco_json_path)
 
         return coco_json_path
+
     
     def prepare_gts(
         self,
@@ -157,6 +178,13 @@ class CocoDENTEXMetric(CocoMetric):
 
             gt_dict['anns'] = []
             for ann in copy.deepcopy(anns):
+                if self.label is not None and (
+                    'extra' not in ann or
+                    'attributes' not in ann['extra'] or
+                    self.label not in ann['extra']['attributes']
+                ):
+                    continue
+
                 ann['bbox'] = [
                     ann['bbox'][0],
                     ann['bbox'][1],
@@ -181,7 +209,9 @@ class CocoDENTEXMetric(CocoMetric):
         else:
             outfile_prefix = self.outfile_prefix
 
-        coco_json_path = self.gt_to_coco_json(gt_dicts, cat_map, outfile_prefix)
+        coco_json_path = self.gt_to_coco_json(
+            gt_dicts, cat_map, outfile_prefix,
+        )
         coco = COCO(coco_json_path)
 
         return coco

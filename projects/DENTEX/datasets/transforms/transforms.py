@@ -100,9 +100,11 @@ class RandomToothFlip(BaseTransform):
         results['gt_bboxes_labels'] = np.concatenate((
             results['gt_bboxes_labels'], [opposite_label],
         ))
-        results['gt_bboxes_multilabels'] = np.concatenate((
-            results['gt_bboxes_multilabels'], [results['gt_bboxes_multilabels'][tooth_idx]],
-        ))
+
+        if 'gt_bboxes_multilabels' in results:
+            results['gt_bboxes_multilabels'] = np.concatenate((
+                results['gt_bboxes_multilabels'], [results['gt_bboxes_multilabels'][tooth_idx]],
+            ))
         
         flipped_instance_mask = flipped_instance[..., 0] > 0
         results['gt_masks'].masks = np.concatenate((
@@ -134,10 +136,11 @@ class RandomToothFlip(BaseTransform):
             results['gt_bboxes_labels'][:opposite_idx],
             results['gt_bboxes_labels'][opposite_idx + 1:],
         ))
-        results['gt_bboxes_multilabels'] = np.concatenate((
-            results['gt_bboxes_multilabels'][:opposite_idx],
-            results['gt_bboxes_multilabels'][opposite_idx + 1:],
-        ))
+        if 'gt_bboxes_multilabels' in results:
+            results['gt_bboxes_multilabels'] = np.concatenate((
+                results['gt_bboxes_multilabels'][:opposite_idx],
+                results['gt_bboxes_multilabels'][opposite_idx + 1:],
+            ))
         results['gt_masks'].masks = np.concatenate((
             results['gt_masks'].masks[:opposite_idx],
             results['gt_masks'].masks[opposite_idx + 1:],

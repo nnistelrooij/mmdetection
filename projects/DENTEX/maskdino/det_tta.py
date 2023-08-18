@@ -78,6 +78,7 @@ class DENTEXTTAModel(DetTTAModel):
         aug_logits = []
         aug_masks = []
         img_metas = []
+        convert_to_cpu = True
         for data_sample in data_samples:
             masks = data_sample.pred_instances.masks            
             x1 = (masks.sum(dim=1) > 0).int().argmax(dim=-1)
@@ -85,6 +86,9 @@ class DENTEXTTAModel(DetTTAModel):
             x2 = masks.shape[2] - (torch.flip(masks, dims=(2,)).sum(dim=1) > 0).int().argmax(dim=-1)
             y2 = masks.shape[1] - (torch.flip(masks, dims=(1,)).sum(dim=2) > 0).int().argmax(dim=-1)
             bboxes = torch.column_stack((x1, y1, x2, y2))
+
+            if bboxes.device == 'cpu':
+                convert_to_cpu = True
 
             aug_bboxes.append(bboxes.float())
             aug_scores.append(data_sample.pred_instances.scores)
@@ -110,6 +114,13 @@ class DENTEXTTAModel(DetTTAModel):
             masks = data_sample.pred_instances.masks
             flipped_masks = torch.flip(masks, dims=(-1,))
             aug_masks.append(flipped_masks)
+
+        if convert_to_cpu:
+            aug_bboxes = [bboxes.cpu() for bboxes in aug_bboxes]
+            aug_scores = [scores.cpu() for scores in aug_scores]
+            aug_labels = [labels.cpu() for labels in aug_labels]
+            aug_logits = [logits.cpu() for logits in aug_logits]
+            aug_masks = [masks.cpu() for masks in aug_masks]
 
         merged_bboxes, merged_scores = self.merge_aug_bboxes(
             aug_bboxes, aug_scores, img_metas)

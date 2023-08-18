@@ -1,5 +1,4 @@
 _base_ = '../../MaskDINO/configs/maskdino_r50_8xb2-lsj-50e_coco-panoptic.py'
-# _base_ = './maskdino-5scale_swin-l_8xb2-12e_coco.py'
 
 custom_imports = dict(
     imports=[
@@ -60,6 +59,7 @@ train_pipeline = [
 ]
 
 train_dataloader = dict(
+    batch_size=1,
     dataset=dict(
         _delete_=True, 
         type='InstanceBalancedDataset',
@@ -128,7 +128,41 @@ custom_hooks = [dict(type='ClassCountsHook')]
 model = dict(
     type='MaskDINOMultilabel',
     test_cfg=dict(panoptic_on=False, instance_on=True, max_per_image=100),
-    panoptic_head=dict(type='MaskDINOMultilabelHead'),
+    backbone=dict(
+        _delete_=True,
+        type='SwinTransformer',
+        embed_dims=192,
+        depths=[2, 2, 18, 2],
+        num_heads=[6, 12, 24, 48],
+        window_size=12,
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        drop_rate=0.,
+        attn_drop_rate=0.,
+        drop_path_rate=0.3,
+        patch_norm=True,
+        out_indices=(0, 1, 2, 3),
+        with_cp=False,
+        convert_weights=True,
+        init_cfg=None,
+    ),
+    panoptic_head=dict(
+        type='MaskDINOMultilabelHead',
+        encoder=dict(
+            in_channels=[
+                192, 384, 768, 1536,
+            ],
+            transformer_in_features=[
+                'res2', 'res3', 'res4', 'res5',
+            ],
+            num_feature_levels=4,
+            total_num_feature_levels=5,
+        ),
+        decoder=dict(
+            total_num_feature_levels=5,
+        )
+    ),
     panoptic_fusion_head=dict(type='MaskDINOMultilabelFusionHead'),
 )
 
@@ -154,5 +188,9 @@ visualizer = dict(
     ],
 )
 
-# load_from = 'checkpoints/maskdino_mmdet.pth'
-# load_from = 'work_dirs/opgs_fold_enumeration_0/epoch_50.pth'
+optim_wrapper = dict(
+    accumulative_counts=2,
+)
+
+
+# load_from = 'checkpoints/maskdino_swin_mmdet.pth'

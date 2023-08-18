@@ -116,6 +116,11 @@ class CocoMetric(BaseMetric):
         if ann_file is not None:
             with self.file_client.get_local_path(ann_file) as local_path:
                 self._coco_api = COCO(local_path)
+                # name2id = {cat['name']: cat['id'] for cat in self._coco_api.cats.values()}
+                # for ann in self._coco_api.anns.values():
+                #     name = self._coco_api.cats[ann['category_id']]['name']
+                #     if len(name) == 2:
+                #         ann['category_id'] = name2id['11']
                 if sort_categories:
                     # 'categories' list in objects365_train.json and
                     # objects365_val.json is inconsistent, need sort
@@ -219,7 +224,7 @@ class CocoMetric(BaseMetric):
         segm_json_results = [] if 'masks' in results[0] else None
         for idx, result in enumerate(results):
             image_id = result.get('img_id', idx)
-            labels = result['labels']
+            labels = result['labels']  #  * 0
             bboxes = result['bboxes']
             scores = result['scores']
             # bbox results
@@ -402,8 +407,13 @@ class CocoMetric(BaseMetric):
 
         # handle lazy init
         if self.cat_ids is None:
-            self.cat_ids = self._coco_api.get_cat_ids(
-                cat_names=self.dataset_meta['classes'])
+            name2id = {cat['name']: cat['id'] for cat in self._coco_api.cats.values()}
+            self.cat_ids = []
+            for name in self.dataset_meta['classes']:
+                assert name in name2id, (
+                    f'Class "{name}" defined in dataset missing in COCO file'
+                )
+                self.cat_ids.append(name2id[name])
         if self.img_ids is None:
             self.img_ids = self._coco_api.get_img_ids()
 

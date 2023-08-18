@@ -102,8 +102,8 @@ def main():
                 type='TestTimeAug',
                 transforms=[
                     [
+                        dict(type='RandomFlip', prob=0.),
                         dict(type='RandomFlip', prob=1.),
-                        dict(type='RandomFlip', prob=0.)
                     ],
                     [
                         dict(
