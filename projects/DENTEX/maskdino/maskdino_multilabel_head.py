@@ -35,6 +35,7 @@ class MaskDINOMultilabelHead(MaskDINOHead):
 
         train_cfg['hnm_samples'] = hnm_samples
         train_cfg['use_fed_loss'] = use_fed_loss
+        train_cfg['enable_multilabel'] = enable_multilabel
         self.criterion = SetMultilabelCriterion(**train_cfg)
 
     def loss(self, feats, batch_data_samples):

@@ -1,9 +1,9 @@
-_base_ = './maskdino-5scale_swin-l_8xb2-12e_coco_multilabel.py'
+_base_ = './maskdino_r50_coco_multilabel.py'
 
 data_root = '/home/mkaailab/.darwin/datasets/mucoaid/dentexv2/'
-export = 'fdi-checkedv2'
-fold = '_enumeration_4'
-multilabel = False
+export = 'curated-odonto'
+fold = '_dentex_diagnoses'
+multilabel = True
 data_prefix = dict(img=data_root + 'images')
 ann_prefix = data_root + f'releases/{export}/other_formats/coco/'
 work_dir = f'work_dirs/opgs_fold{fold}/'
@@ -46,7 +46,7 @@ test_dataloader = dict(
     persistent_workers=False,
     dataset=dict(
         # ann_file=ann_prefix + f'val{fold}.json',
-        ann_file=ann_prefix + '572.json',
+        ann_file=ann_prefix + f'val{fold}.json',
         data_prefix=data_prefix,
         data_root=data_root,
         metainfo=dict(classes=classes, attributes=attributes),
@@ -59,18 +59,18 @@ test_evaluator = dict(
     # ann_file=data_root + 'annotations/instances_val2017_onesample_139.json',  # TODO: delete before merging
     metric=['bbox', 'segm'],
 )
-test_evaluator = [
-    dict(
-        type='DumpNumpyDetResults',
-        out_file_path=work_dir + 'detection.pkl',
-    ),
-    dict(
-        type='CocoMetric',
-        ann_file=ann_prefix + f'val{fold}.json',
-        # ann_file=data_root + 'annotations/instances_val2017_onesample_139.json',  # TODO: delete before merging
-        metric=['bbox', 'segm'],
-    )
-]
+# test_evaluator = [
+#     dict(
+#         type='DumpNumpyDetResults',
+#         out_file_path=work_dir + 'detection.pkl',
+#     ),
+#     dict(
+#         type='CocoMetric',
+#         ann_file=ann_prefix + f'val{fold}.json',
+#         # ann_file=data_root + 'annotations/instances_val2017_onesample_139.json',  # TODO: delete before merging
+#         metric=['bbox', 'segm'],
+#     )
+# ]
 
 max_per_image = 100
 model = dict(
@@ -104,21 +104,20 @@ tta_model = dict(
 )
 
 load_from = 'checkpoints/maskdino_mmdet.pth'
-load_from = 'work_dirs/opgs_fold_ext_enumeration_0/epoch_50.pth'
+load_from = 'work_dirs/opgs_fold_odonto_dentex_enumeration/epoch_50.pth'
 
-if 'ext' in load_from:
-    train_cfg = dict(max_epochs=36)
-    # train_cfg = dict(max_epochs=24)
-    param_scheduler = [
-        dict(
-            type='MultiStepLR',
-            begin=0,
-            end=36,  # 24
-            by_epoch=True,
-            milestones=[28, 34],  # [16, 22],
-            gamma=0.1,
-        )
-    ]
+
+train_cfg = dict(max_epochs=24)
+param_scheduler = [
+    dict(
+        type='MultiStepLR',
+        begin=0,
+        end=24,
+        by_epoch=True,
+        milestones=[16, 22],
+        gamma=0.1,
+    )
+]
 
 default_hooks = dict(checkpoint=dict(
     save_best='coco/segm_split-diagnoses=False',

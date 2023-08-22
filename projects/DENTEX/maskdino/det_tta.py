@@ -5,6 +5,8 @@ from mmcv.ops import batched_nms
 from mmengine.logging import MMLogger
 from mmengine.registry import MODELS
 from mmengine.structures import InstanceData
+import numpy as np
+from scipy import ndimage
 import torch
 
 from mmdet.models import DetTTAModel
@@ -59,8 +61,38 @@ class DENTEXTTAModel(DetTTAModel):
         merged_data_samples = []
         for data_samples in data_samples_list:
             merged_data_samples.append(self._merge_single_sample(data_samples))
-        return merged_data_samples
-    
+        return merged_data_samples    
+
+    def denoise_masks(self, masks, rel_count: float=5.0):
+        structure = ndimage.generate_binary_structure(3, 2)
+        structure[[0, 2]] = False
+        labels, max_label = ndimage.label(masks, structure)
+
+        maxs = np.concatenate(([0], labels.max(axis=(1, 2))))
+        max_label = 0
+        for i, label in enumerate(maxs):
+            if label == 0:
+                maxs[i] = max_label
+            else:
+                max_label = label
+        mask_idxs = np.concatenate([
+            np.full(max2 - max1, i) if i == 0 or max1 > 0 and max2 > 0 else []
+            for i, (max1, max2) in enumerate(zip(maxs[:-1], maxs[1:]))
+        ])
+
+        counts = np.bincount(labels.flatten())[1:]
+        labels = np.maximum(0, labels - maxs[:-1].reshape(-1, 1, 1))
+        for i in range(masks.shape[0]):
+            mask_counts = counts[mask_idxs == i]
+            mask_counts = np.concatenate(([10_000], mask_counts))
+            if mask_counts.shape[0] == 1:
+                continue
+
+            keep_mask = mask_counts >= (mask_counts[1:].max() / rel_count)
+            masks[i][~keep_mask[labels[i]]] = False
+
+        return masks
+
     def _merge_single_sample(
             self, data_samples: List[DetDataSample]) -> DetDataSample:
         """Merge predictions which come form the different views of one image
@@ -75,12 +107,15 @@ class DENTEXTTAModel(DetTTAModel):
         aug_bboxes = []
         aug_scores = []
         aug_labels = []
+        aug_multilabels = []
+        aug_multilogits = []
         aug_logits = []
         aug_masks = []
         img_metas = []
         convert_to_cpu = True
         for data_sample in data_samples:
-            masks = data_sample.pred_instances.masks            
+            masks = data_sample.pred_instances.masks
+            # masks = torch.from_numpy(self.denoise_masks(masks.cpu().numpy()))
             x1 = (masks.sum(dim=1) > 0).int().argmax(dim=-1)
             y1 = (masks.sum(dim=2) > 0).int().argmax(dim=-1)
             x2 = masks.shape[2] - (torch.flip(masks, dims=(2,)).sum(dim=1) > 0).int().argmax(dim=-1)
@@ -92,6 +127,8 @@ class DENTEXTTAModel(DetTTAModel):
 
             aug_bboxes.append(bboxes.float())
             aug_scores.append(data_sample.pred_instances.scores)
+            aug_multilabels.append(data_sample.pred_instances.multilabels)
+            aug_multilogits.append(data_sample.pred_instances.multilogits)
             img_metas.append(data_sample.metainfo)
 
             if not data_sample.flip:
@@ -119,12 +156,16 @@ class DENTEXTTAModel(DetTTAModel):
             aug_bboxes = [bboxes.cpu() for bboxes in aug_bboxes]
             aug_scores = [scores.cpu() for scores in aug_scores]
             aug_labels = [labels.cpu() for labels in aug_labels]
+            aug_multilabels = [labels.cpu() for labels in aug_multilabels]
+            aug_multilogits = [labels.cpu() for labels in aug_multilogits]
             aug_logits = [logits.cpu() for logits in aug_logits]
             aug_masks = [masks.cpu() for masks in aug_masks]
 
         merged_bboxes, merged_scores = self.merge_aug_bboxes(
             aug_bboxes, aug_scores, img_metas)
         merged_labels = torch.cat(aug_labels, dim=0)
+        merged_multilabels = torch.cat(aug_multilabels, dim=0)
+        merged_multilogits = torch.cat(aug_multilogits, dim=0)
         merged_logits = torch.cat(aug_logits, dim=0)
         merged_masks = torch.cat(aug_masks, dim=0)
 
@@ -139,6 +180,8 @@ class DENTEXTTAModel(DetTTAModel):
 
         det_bboxes = det_bboxes[:self.tta_cfg.max_per_img]
         det_labels = merged_labels[keep_idxs][:self.tta_cfg.max_per_img]
+        det_multilabels = merged_multilabels[keep_idxs][:self.tta_cfg.max_per_img]
+        det_multilogits = merged_multilogits[keep_idxs][:self.tta_cfg.max_per_img]
         det_logits = merged_logits[keep_idxs][:self.tta_cfg.max_per_img]
         det_masks = merged_masks[keep_idxs][:self.tta_cfg.max_per_img]
 
@@ -147,10 +190,11 @@ class DENTEXTTAModel(DetTTAModel):
         results.bboxes = _det_bboxes[:, :-1]
         results.scores = _det_bboxes[:, -1]
         results.labels = det_labels
+        results.multilabels = det_multilabels
+        results.multiscores = det_multilogits.sigmoid()
         results.logits = det_logits
         results.masks = det_masks
         det_results = data_samples[0]
         det_results.pred_instances = results
         
         return det_results
-

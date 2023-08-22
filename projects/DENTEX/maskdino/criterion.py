@@ -80,6 +80,7 @@ class SetMultilabelCriterion(SetCriterion):
         tversky_weight=5.0,
         hnm_samples: int=-1,
         use_fed_loss: bool=True,
+        enable_multilabel: bool=False,
         *args,
         **kwargs
     ):
@@ -108,6 +109,7 @@ class SetMultilabelCriterion(SetCriterion):
 
         self.hnm_samples = hnm_samples
         self.use_fed_loss = use_fed_loss
+        self.enable_multilabel = enable_multilabel
 
     def forward(self, outputs, targets, mask_dict=None):
         # targets = self.split_diagnoses(targets)
@@ -204,13 +206,16 @@ class SetMultilabelCriterion(SetCriterion):
             target_classes = torch.full(src_logits.shape[:2], num_classes,
                                         dtype=torch.int64, device=src_logits.device)
             target_classes[idx] = target_classes_o
+            target_classes_onehot = torch.zeros(*src_logits.shape[:-1], num_classes + 1,
+                    dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
+            target_classes_onehot.scatter_(-1, target_classes.unsqueeze(-1), 1)
+
+            target_classes_onehot = target_classes_onehot[..., :-1]
         else:
             src_logits = torch.cat([p[J] for p, (J, _) in zip(src_logits, indices)])
-            target_classes = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
+            target_classes_onehot = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
+            target_classes_onehot = target_classes_onehot.to(src_logits)
 
-        target_classes_onehot = torch.zeros(*src_logits.shape[:-1], num_classes + 1,
-                dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
-        target_classes_onehot.scatter_(-1, target_classes.unsqueeze(-1), 1)
 
         if self.use_fed_loss:
             fed_classes = self.get_federated_classes(target_classes_onehot, self.fdi_weights, num_classes)
@@ -218,8 +223,7 @@ class SetMultilabelCriterion(SetCriterion):
             weights[..., fed_classes] = 1
         else:
             weights = None
-
-        target_classes_onehot = target_classes_onehot[..., :-1]
+        
 
         loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_boxes, weights, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
 
@@ -337,7 +341,7 @@ class SetMultilabelCriterion(SetCriterion):
 
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
 
-        if loss == 'multilabels':
+        if not self.enable_multilabel and loss == 'multilabels':
             return {}
 
         return loss_map[loss](outputs, targets, indices, num_masks)

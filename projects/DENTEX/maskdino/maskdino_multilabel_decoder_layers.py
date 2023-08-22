@@ -24,6 +24,8 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
         """
         super().__init__(*args, **kwargs)
 
+        super().requires_grad_(False)
+
         if self.mask_classification:
             self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
         self.enable_multilabel = enable_multilabel

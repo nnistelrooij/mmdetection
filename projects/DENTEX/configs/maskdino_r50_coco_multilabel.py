@@ -116,7 +116,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[int(max_epochs * 8 / 9), int(max_epochs * 26 / 27)],
+        milestones=[max_epochs - 6, max_epochs - 2],
         gamma=0.1,
     )
 ]
@@ -155,4 +155,4 @@ visualizer = dict(
 )
 
 
-# load_from = 'checkpoints/maskdino_r50_mmdet.pth'
+load_from = 'checkpoints/maskdino_r50_mmdet.pth'

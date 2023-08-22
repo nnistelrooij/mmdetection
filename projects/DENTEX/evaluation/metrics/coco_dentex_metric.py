@@ -2,7 +2,7 @@ import copy
 import json
 from pathlib import Path
 import tempfile
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from mmengine.fileio import dump
 from mmengine.logging import MMLogger
@@ -52,6 +52,7 @@ class CocoDENTEXMetric(CocoMetric):
         for data_sample, (_, result) in zip(data_samples[::-1], self.results[::-1]):
             pred = data_sample['pred_instances']
             result['multilabels'] = pred['multilabels'].cpu().numpy()
+            result['multiscores'] = pred['multiscores'].cpu().numpy()
 
     def ann2cats(
         self,
@@ -87,30 +88,28 @@ class CocoDENTEXMetric(CocoMetric):
     def labels2cats(
         self,
         label: int,
-        multilabel: List[int],
+        score: float,
+        multiscore: List[float],
         cat_map: Dict[str, Dict],
         split_diagnoses: bool,
-    ) -> List[int]:
+    ) -> List[Tuple[int, float]]:
         cat_name = self.dataset_meta['classes'][label]
         if not split_diagnoses and cat_name in cat_map:
-            return [cat_map[cat_name]['id']]
-        
-
-        if not np.any(multilabel):
-            return []
+            return [(cat_map[cat_name]['id'], score)]
         
         if self.label:
             if cat_name not in cat_map:
-                return [cat_map[self.label]['id']]
+                return [(cat_map[self.label]['id'], multiscore[-1].sigmoid())]
             else:
-                return [cat_map[cat_name]['id']]
+                return [(cat_map[cat_name]['id'], score)]
 
         cat_ids = []
-        for attr_idx in np.nonzero(multilabel)[0]:
+        for attr_idx in range(multiscore.shape[0]):
             if cat_name not in cat_map:
                 cat_name = self.dataset_meta['attributes'][attr_idx]
-
-            cat_ids.append(cat_map[cat_name]['id'])
+            
+            score = multiscore[attr_idx]
+            cat_ids.append((cat_map[cat_name]['id'], score))
 
         return cat_ids
     
@@ -121,10 +120,12 @@ class CocoDENTEXMetric(CocoMetric):
         split_diagnoses: bool
     ) -> List[int]:
         bboxes, scores, labels, masks = [], [], [], []
-        for bbox, score, label, mask, multilabel in zip(*(pred[key] for key in [
-            'bboxes', 'scores', 'labels', 'masks', 'multilabels',
+        for bbox, score, label, mask, multiscores in zip(*(pred[key] for key in [
+            'bboxes', 'scores', 'labels', 'masks', 'multiscores',
         ])):
-            for cat_id in self.labels2cats(label, multilabel, cat_map, split_diagnoses):
+            for cat_id, score in self.labels2cats(
+                label, score, multiscores, cat_map, split_diagnoses,
+            ):
                 bboxes.append(bbox)
                 scores.append(score)
                 labels.append(cat_id)

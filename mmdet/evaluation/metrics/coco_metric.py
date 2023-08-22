@@ -77,7 +77,8 @@ class CocoMetric(BaseMetric):
                  file_client_args: dict = dict(backend='disk'),
                  collect_device: str = 'cpu',
                  prefix: Optional[str] = None,
-                 sort_categories: bool = False) -> None:
+                 sort_categories: bool = False,
+                 class_agnostic: bool = False) -> None:
         super().__init__(collect_device=collect_device, prefix=prefix)
         # coco evaluation metrics
         self.metrics = metric if isinstance(metric, list) else [metric]
@@ -116,11 +117,12 @@ class CocoMetric(BaseMetric):
         if ann_file is not None:
             with self.file_client.get_local_path(ann_file) as local_path:
                 self._coco_api = COCO(local_path)
-                # name2id = {cat['name']: cat['id'] for cat in self._coco_api.cats.values()}
-                # for ann in self._coco_api.anns.values():
-                #     name = self._coco_api.cats[ann['category_id']]['name']
-                #     if len(name) == 2:
-                #         ann['category_id'] = name2id['11']
+                if class_agnostic:
+                    name2id = {cat['name']: cat['id'] for cat in self._coco_api.cats.values()}
+                    for ann in self._coco_api.anns.values():
+                        name = self._coco_api.cats[ann['category_id']]['name']
+                        if len(name) == 2:
+                            ann['category_id'] = name2id['11']
                 if sort_categories:
                     # 'categories' list in objects365_train.json and
                     # objects365_val.json is inconsistent, need sort
@@ -136,6 +138,7 @@ class CocoMetric(BaseMetric):
             self._coco_api = None
 
         # handle dataset lazy init
+        self.class_agnostic = class_agnostic
         self.cat_ids = None
         self.img_ids = None
 
@@ -224,7 +227,10 @@ class CocoMetric(BaseMetric):
         segm_json_results = [] if 'masks' in results[0] else None
         for idx, result in enumerate(results):
             image_id = result.get('img_id', idx)
-            labels = result['labels']  #  * 0
+            if self.class_agnostic:
+                labels = result['labels'] * 0
+            else:
+                labels = result['labels']
             bboxes = result['bboxes']
             scores = result['scores']
             # bbox results

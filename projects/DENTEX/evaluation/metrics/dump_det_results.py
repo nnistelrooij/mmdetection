@@ -5,6 +5,8 @@ from typing import Sequence
 from mmengine.evaluator import DumpResults
 from mmengine.evaluator.metric import _to_cpu
 from mmengine.logging import MMLogger
+import numpy as np
+from scipy import ndimage
 import torch
 from torch_scatter import scatter_max, scatter_min
 
