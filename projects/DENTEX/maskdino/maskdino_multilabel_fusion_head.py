@@ -20,23 +20,19 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
     """MaskDINO fusion head which postprocesses results for panoptic
     segmentation, instance segmentation and semantic segmentation."""
 
-    def __init__(self,
-                 num_things_classes: int = 80,
-                 num_stuff_classes: int = 53,
-                 test_cfg: OptConfigType = None,
-                 loss_panoptic: OptConfigType = None,  # TODO: not used ?
-                 init_cfg: OptMultiConfig = None,
-                 enable_multilabel: bool=False,
-                 **kwargs):
-        super().__init__(
-            num_things_classes=num_things_classes,
-            num_stuff_classes=num_stuff_classes,
-            test_cfg=test_cfg,
-            loss_panoptic=loss_panoptic,
-            init_cfg=init_cfg,
-            **kwargs)
+    def __init__(
+        self,
+        enable_multilabel: bool=False,
+        enable_multiclass: bool=False,
+        num_upper_masks: int=1,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
         
         self.enable_multilabel = enable_multilabel
+        self.enable_multiclass = enable_multiclass
+        self.num_upper_masks = num_upper_masks
 
     def predict(self,
                 mask_cls_results: Tensor,
@@ -63,15 +59,19 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
             batch_input_height, batch_input_width = meta['batch_input_shape'][:2]
 
             # remove padding
-            mask_pred_result = mask_pred_result[:, :img_height, :img_width]
+            mask_pred_result = mask_pred_result[..., :img_height, :img_width]
+            mask_pred_result = mask_pred_result.reshape(
+                mask_pred_result.shape[0], -1, img_height, img_width,
+            )
 
             if rescale:
                 # return result in original resolution
                 mask_pred_result = F.interpolate(
-                    mask_pred_result[:, None],
+                    mask_pred_result,
                     size=(ori_height, ori_width),
                     mode='bilinear',
-                    align_corners=False)[:, 0]
+                    align_corners=False,
+                )
 
             result = dict()
             
@@ -178,24 +178,33 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         mask_pred = mask_pred[is_thing]
         mask_box = mask_box[is_thing] if mask_box is not None else None  # TODO: difference
 
-        mask_pred_binary = (mask_pred > 0).float()
-        mask_scores_per_image = (mask_pred.sigmoid() *
+        mask_pred_max = torch.amax(mask_pred[:, :self.num_upper_masks], dim=1)
+        mask_pred_binary = (mask_pred_max > 0).float()
+        mask_scores_per_image = (mask_pred_max.sigmoid() *
                                  mask_pred_binary).flatten(1).sum(1) / (
                                      mask_pred_binary.flatten(1).sum(1) + 1e-6)  # TODO：why ？
         det_scores = scores_per_image * mask_scores_per_image  # TODO：why ？
-        mask_pred_binary = mask_pred_binary.bool()
-        bboxes = mask_box if mask_box is not None else mask2bbox(mask_pred_binary)  # TODO: difference
 
         results = InstanceData()
-        results.bboxes = bboxes
+        results.bboxes = mask_box
         results.labels = labels_per_image
         results.logits = mask_cls
+        results.multilogits = mask_attributes
         results.scores = det_scores if not focus_on_box else 1.0
-        results.masks = mask_pred_binary
+
+        if self.enable_multiclass:
+            results.masks = mask_pred >= 0
+        else:
+            results.masks = mask_pred_binary.bool()
+
         if self.enable_multilabel:
             results.multilabels = attributes_per_image
+        elif self.enable_multiclass:
+            results.multilabels = torch.column_stack((
+                mask_attributes >= 0,
+                mask_pred[:, self.num_upper_masks:].amax(dim=(-2, -1)) >= 0,
+            ))
         else:
             results.multilabels = mask_attributes > 0
-        results.multilogits = mask_attributes
 
         return results

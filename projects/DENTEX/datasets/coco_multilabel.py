@@ -14,7 +14,7 @@ class CocoMultilabelDataset(CocoDataset):
         self,
         attributes: List[str],
     ) -> List[int]:
-        attr2label = {attr: i for i, attr in enumerate(self.metainfo['attributes'])}
+        attr2label = {attr: i for i, attr in enumerate(self._metainfo['attributes'])}
         multilabel = [0]*len(attr2label)
         for attr in attributes:
             multilabel[attr2label[attr]] = 1
@@ -33,13 +33,13 @@ class CocoMultilabelDataset(CocoDataset):
         img_info = raw_data_info['raw_img_info']
         ann_info = raw_data_info['raw_ann_info']
 
-        cat_ids = [0]*len(self.metainfo['classes'])
+        cat_ids = [0]*len(self._metainfo['classes'])
         for id, cat in self.coco.cats.items():
             category = cat['name']
-            if category not in self.metainfo['classes']:
+            if category not in self._metainfo['classes']:
                 continue
 
-            cat_ids[self.metainfo['classes'].index(category)] = id
+            cat_ids[self._metainfo['classes'].index(category)] = id
 
         cat2label = {cat_id: i for i, cat_id in enumerate(cat_ids)}
 
@@ -72,7 +72,7 @@ class CocoMultilabelDataset(CocoDataset):
                 continue
             if ann['area'] <= 0 or w < 1 or h < 1:
                 continue
-            if ann['category_id'] not in self.cat_ids:
+            if ann['category_id'] not in cat2label:
                 continue
             bbox = [x1, y1, x1 + w, y1 + h]
 

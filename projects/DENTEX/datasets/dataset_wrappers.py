@@ -20,8 +20,9 @@ class InstanceBalancedDataset(ClassBalancedDataset):
             instances = self.dataset.get_data_info(idx)['instances']
             if not instances:
                 continue
-            
+
             attributes = np.stack([ann['bbox_multilabel'] for ann in instances])
+
             attributes = attributes[np.any(attributes, axis=-1)]
 
             cat_ids = set()

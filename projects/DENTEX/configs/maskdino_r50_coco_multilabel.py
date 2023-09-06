@@ -4,6 +4,7 @@ custom_imports = dict(
     imports=[
         'projects.DENTEX.datasets',
         'projects.DENTEX.datasets.dataset_wrappers',
+        'projects.DENTEX.datasets.samplers',
         'projects.DENTEX.datasets.transforms.loading',
         'projects.DENTEX.datasets.transforms.formatting',
         'projects.DENTEX.datasets.transforms.transforms',
@@ -59,6 +60,7 @@ train_pipeline = [
 ]
 
 train_dataloader = dict(
+    # batch_sampler=dict(_scope_='mmdet', type='InstanceCountBatchSampler'),
     batch_size=2,
     dataset=dict(
         _delete_=True, 
@@ -83,17 +85,12 @@ train_dataloader = dict(
 val_pipeline=[
     dict(
         type='LoadImageFromFile',
-        file_client_args=dict(backend='disk'),
-        imdecode_backend='pillow'),
+    ),
     dict(
         type='Resize',
         scale=(1333, 800),
-        keep_ratio=True,
-        backend='pillow'),
-    dict(
-        type='LoadMultilabelAnnotations',
-        file_client_args=dict(backend='disk'),
-        with_bbox=True, with_mask=True),
+        keep_ratio=True),
+    dict(type='LoadMultilabelAnnotations', with_bbox=True, with_mask=True),
     dict(
         type='PackMultilabelDetInputs',
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
@@ -155,4 +152,5 @@ visualizer = dict(
 )
 
 
-load_from = 'checkpoints/maskdino_r50_mmdet.pth'
+# load_from = 'checkpoints/maskdino_r50_mmdet.pth'
+load_from = 'work_dirs/opgs_fold_promaton_teeth_0/epoch_29.pth'

@@ -25,24 +25,28 @@ class MaskDINOMultilabelHead(MaskDINOHead):
     ):
         num_attributes = decoder.pop('num_attributes')
         enable_multilabel = decoder.pop('enable_multilabel')
+        enable_multiclass = decoder.pop('enable_multiclass')
+        num_classes = decoder.pop('num_classes')
         hnm_samples = train_cfg.pop('hnm_samples')
         use_fed_loss = train_cfg.pop('use_fed_loss')
+        decoder['num_classes'] = num_classes if isinstance(num_classes, int) else num_classes[0]
         super().__init__(decoder=decoder, train_cfg=train_cfg, *args, **kwargs)
 
         decoder['num_attributes'] = num_attributes
         decoder['enable_multilabel'] = enable_multilabel
+        decoder['enable_multiclass'] = enable_multiclass
+        decoder['num_classes'] = num_classes
         self.predictor = MaskDINOMultilabelDecoder(**decoder)
 
         train_cfg['hnm_samples'] = hnm_samples
         train_cfg['use_fed_loss'] = use_fed_loss
         train_cfg['enable_multilabel'] = enable_multilabel
+        train_cfg['enable_multiclass'] = enable_multiclass
         self.criterion = SetMultilabelCriterion(**train_cfg)
 
+        self.enable_multiclass = enable_multiclass
+
     def loss(self, feats, batch_data_samples):
-        if torch.any(torch.isnan(self.predictor.attributes_embed.weight)):
-            k = 3
-
-
         targets = self.prepare_targets(batch_data_samples)
         outputs, mask_dict = self(feats, mask=None, targets=targets)  # TODO: deal with key_padding_masks ?
         # bipartite matching-based loss
@@ -54,10 +58,6 @@ class MaskDINOMultilabelHead(MaskDINOHead):
             else:
                 # remove this loss if not specified in `weight_dict`
                 losses.pop(k)
-        
-        for _, x_ in losses.items():
-            if torch.any(torch.isnan(x_) | torch.isinf(x_)):
-                k = 3
 
         return losses
 
@@ -68,13 +68,24 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         mask_box_results = outputs["pred_boxes"]
         mask_attrs_results = outputs["pred_multilabel_logits"]
 
+        keep = mask_cls_results.amax(dim=2).sigmoid() >= 0.05
+        mask_cls_results = mask_cls_results[None, keep]
+        mask_pred_results = mask_pred_results[None, keep]
+        mask_box_results = mask_box_results[None, keep]
+        mask_attrs_results = mask_attrs_results[None, keep]
+
         # upsample masks
+        b, q, c, h, w = mask_pred_results.shape
         batch_input_shape = batch_data_samples[0].metainfo['batch_input_shape']
         mask_pred_results = F.interpolate(
-            mask_pred_results,
-            size=(batch_input_shape[0], batch_input_shape[1]),
+            mask_pred_results.reshape(b, q * c, h, w),
+            size=batch_input_shape[:2],
             mode='bilinear',
             align_corners=False)
+        
+        if self.enable_multiclass:
+            mask_pred_results = mask_pred_results.reshape(b, q, c, *batch_input_shape[:2])
+
 
         return mask_cls_results, mask_pred_results, mask_box_results, mask_attrs_results
 
@@ -91,7 +102,11 @@ class MaskDINOMultilabelHead(MaskDINOHead):
             image_size_xyxy = torch.as_tensor([w, h, w, h], dtype=torch.float, device=device)
 
             if hasattr(sample_instances.masks, 'masks'):
-                gt_masks = torch.from_numpy(sample_instances.masks.masks).bool().to(device)
+                gt_masks = torch.from_numpy(sample_instances.masks.masks)
+                if self.enable_multiclass:
+                    gt_masks = gt_masks.to(device)
+                else:
+                    gt_masks = gt_masks.bool().to(device)
             else:
                 gt_masks = sample_instances.masks
 

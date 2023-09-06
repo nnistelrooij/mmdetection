@@ -1,10 +1,7 @@
-import copy
-
 import torch
 
 from projects.MaskDINO.maskdino.criterion import (
     SetCriterion,
-    calculate_uncertainty,
     dice_loss_jit,
     get_uncertain_point_coords_with_randomness,
     nested_tensor_from_tensor_list,
@@ -12,6 +9,7 @@ from projects.MaskDINO.maskdino.criterion import (
     sigmoid_ce_loss_jit,
     sigmoid_focal_loss,
 )
+from projects.DENTEX.maskdino.matcher import HungarianMatcher
 
 
 def tversky_focal_loss(
@@ -67,6 +65,22 @@ def asymmetric_loss(
         return loss.mean(1) / num_boxes
     
 
+def calculate_uncertainty(logits):
+    """
+    We estimate uncerainty as L1 distance between 0.0 and the logit prediction in 'logits' for the
+        foreground class in `classes`.
+    Args:
+        logits (Tensor): A tensor of shape (R, 1, ...) for class-specific or
+            class-agnostic, where R is the total number of predicted masks in all images and C is
+            the number of foreground classes. The values are logits.
+    Returns:
+        scores (Tensor): A tensor of shape (R, 1, ...) that contains uncertainty scores with
+            the most uncertain locations having the highest uncertainty score.
+    """
+    gt_class_logits = logits.clone()
+    return -(torch.abs(torch.amax(gt_class_logits[:, :-1], dim=1, keepdim=True)))
+
+
 class SetMultilabelCriterion(SetCriterion):
     """This class computes the loss for DETR.
     The process happens in two steps:
@@ -76,11 +90,13 @@ class SetMultilabelCriterion(SetCriterion):
 
     def __init__(
         self,
+        matcher,
         attributes_weight=4.0,
         tversky_weight=5.0,
         hnm_samples: int=-1,
         use_fed_loss: bool=True,
-        enable_multilabel: bool=False,
+    enable_multilabel: bool=False,
+        enable_multiclass: bool=False,
         *args,
         **kwargs
     ):
@@ -92,7 +108,7 @@ class SetMultilabelCriterion(SetCriterion):
             eos_coef: relative classification weight applied to the no-object category
             losses: list of all the losses to be applied. See get_loss for list of available losses.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__(matcher=matcher, *args, **kwargs)
         
         self.weight_dict.update({
             k.replace('ce', 'bces'): attributes_weight
@@ -110,11 +126,11 @@ class SetMultilabelCriterion(SetCriterion):
         self.hnm_samples = hnm_samples
         self.use_fed_loss = use_fed_loss
         self.enable_multilabel = enable_multilabel
+        self.enable_multiclass = enable_multiclass
 
-    def forward(self, outputs, targets, mask_dict=None):
-        # targets = self.split_diagnoses(targets)
-
-        return super().forward(outputs, targets, mask_dict)
+        self.matcher = HungarianMatcher(
+            **matcher, panoptic_on=False, enable_multiclass=enable_multiclass,
+        )
 
     def set_federated_class_weights(
         self,
@@ -200,6 +216,10 @@ class SetMultilabelCriterion(SetCriterion):
         src_logits = outputs['pred_multilabel_logits']
         num_classes = src_logits.shape[2]
 
+
+        if not self.enable_multilabel and not self.enable_multiclass:
+            return {'loss_bces': src_logits.flatten()[0] * 0}
+
         if no_object:
             idx = self._get_src_permutation_idx(indices)
             target_classes_o = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
@@ -214,7 +234,7 @@ class SetMultilabelCriterion(SetCriterion):
         else:
             src_logits = torch.cat([p[J] for p, (J, _) in zip(src_logits, indices)])
             target_classes_onehot = torch.cat([t["multilabels"][J] for t, (_, J) in zip(targets, indices)])
-            target_classes_onehot = target_classes_onehot.to(src_logits)
+            target_classes_onehot = target_classes_onehot[:, :src_logits.shape[1]].to(src_logits)
 
 
         if self.use_fed_loss:
@@ -244,13 +264,20 @@ class SetMultilabelCriterion(SetCriterion):
         masks = [t["masks"] for t in targets]
         # TODO use valid to mask invalid areas due to padding in loss
         target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
-        target_masks = target_masks.to(src_masks)
-        target_masks = target_masks[tgt_idx]
+
 
         # No need to upsample predictions as we are using normalized coordinates :)
         # N x 1 x H x W
-        src_masks = src_masks[:, None]
-        target_masks = target_masks[:, None]
+        if self.enable_multiclass:
+            target_masks = target_masks[tgt_idx]
+            target_masks = torch.stack([
+                (target_masks & (2**i)) > 0 for i in range(src_masks.shape[1])
+            ], dim=1).to(src_masks)
+        else:
+            target_masks = target_masks.to(src_masks)
+            target_masks = target_masks[tgt_idx]
+            src_masks = src_masks[:, None]
+            target_masks = target_masks[:, None]
 
         with torch.no_grad():
             # sample point_coords
@@ -340,8 +367,5 @@ class SetMultilabelCriterion(SetCriterion):
         #     indices = self.hard_negative_mining(outputs, targets, indices, num_masks)
 
         assert loss in loss_map, f"do you really want to compute {loss} loss?"
-
-        if not self.enable_multilabel and loss == 'multilabels':
-            return {}
 
         return loss_map[loss](outputs, targets, indices, num_masks)

@@ -1,21 +1,16 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import copy
-import os.path as osp
 from pathlib import Path
-import re
-from typing import List, Union
+from typing import List
 
-import numpy as np
-import pandas as pd
-import SimpleITK
+import cv2
 
 from mmdet.registry import DATASETS
 from mmdet.datasets.base_det_dataset import BaseDetDataset
 
 
 @DATASETS.register_module()
-class SingleMHADataset(BaseDetDataset):
-    """Dataset for multiple images from single MHA file."""
+class PNGsDataset(BaseDetDataset):
+    """Dataset for multiple PNG files."""
 
     METAINFO = {
         'classes':
@@ -60,10 +55,9 @@ class SingleMHADataset(BaseDetDataset):
 
     def __init__(
         self,
-        mha_meta_file: str,
+        mha_meta_file,
         *args, **kwargs,
     ):
-        self.mha_meta_file = mha_meta_file
         super().__init__(*args, **kwargs)
 
     def load_data_list(self) -> List[dict]:
@@ -72,65 +66,18 @@ class SingleMHADataset(BaseDetDataset):
         Returns:
             List[dict]: A list of annotation.
         """  # noqa: E501        
-        df = pd.read_csv(self.mha_meta_file)
-        df['idx'] = df['file_name'].apply(lambda fn: int(re.split('\.|_', fn)[-2]))
-        df = df.sort_values(by='idx')
-        df = df.reset_index(drop=True)
-
-        mha_file = next(Path('/input/images/panoramic-dental-xrays').glob('*'))
-        imgs = SimpleITK.ReadImage(mha_file)
-        img_arrays = SimpleITK.GetArrayFromImage(imgs)
-        img_arrays = np.transpose(img_arrays, (2, 0, 1, 3))
-
+        file_paths = sorted(Path(self.data_prefix['img']).glob('*.png'))
         
         data_list = []
-        for img_array, img_id, img_path, width, height in zip(
-            img_arrays, df['id'], df['file_name'], df['width'], df['height'],
-        ):
+        for img_id, file_path in enumerate(file_paths, 1):
+            img = cv2.imread(str(file_path))
             data_item = {
-                'img': img_array[:height, :width],
-                'img_shape': (height, width),
-                'ori_shape': (height, width),
+                'img': img,
+                'img_shape': tuple(img.shape[:2]),
+                'ori_shape': tuple(img.shape[:2]),
                 'img_id': img_id,
-                'img_path': Path(img_path),
+                'img_path': file_path,
             }
             data_list.append(data_item)
-
+            
         return data_list
-
-    def filter_data(self) -> List[dict]:
-        """Filter annotations according to filter_cfg.
-
-        Returns:
-            List[dict]: Filtered results.
-        """
-        if self.test_mode:
-            return self.data_list
-
-        if self.filter_cfg is None:
-            return self.data_list
-
-        filter_empty_gt = self.filter_cfg.get('filter_empty_gt', False)
-        min_size = self.filter_cfg.get('min_size', 0)
-
-        # obtain images that contain annotation
-        ids_with_ann = set(data_info['img_id'] for data_info in self.data_list)
-        # obtain images that contain annotations of the required categories
-        ids_in_cat = set()
-        for i, class_id in enumerate(self.cat_ids):
-            ids_in_cat |= set(self.cat_img_map[class_id])
-        # merge the image id sets of the two conditions and use the merged set
-        # to filter out images if self.filter_empty_gt=True
-        ids_in_cat &= ids_with_ann
-
-        valid_data_infos = []
-        for i, data_info in enumerate(self.data_list):
-            img_id = data_info['img_id']
-            width = data_info['width']
-            height = data_info['height']
-            if filter_empty_gt and img_id not in ids_in_cat:
-                continue
-            if min(width, height) >= min_size:
-                valid_data_infos.append(data_info)
-
-        return valid_data_infos

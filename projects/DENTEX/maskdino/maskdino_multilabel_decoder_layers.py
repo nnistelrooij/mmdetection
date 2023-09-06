@@ -1,5 +1,9 @@
+from typing import Tuple, Union
+
 import torch
 from torch import nn
+
+from mmdet.models.layers import MLP
 
 from projects.MaskDINO.maskdino.maskdino_decoder_layers import (
     bbox_xyxy_to_cxcywh,
@@ -13,8 +17,12 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
 
     def __init__(
         self,
+        num_classes: Union[int, Tuple[int, int]],
         num_attributes: int,
         enable_multilabel: bool,
+        enable_multiclass: bool,
+        hidden_dim: int,
+        mask_dim: int,
         *args,
         **kwargs,
     ):
@@ -22,13 +30,31 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
         Args:
             num_attribute_classes: number of multi-label classes
         """
-        super().__init__(*args, **kwargs)
-
-        super().requires_grad_(False)
+        super().__init__(
+            hidden_dim=hidden_dim,
+            mask_dim=mask_dim,
+            num_classes=num_classes if isinstance(num_classes, int) else num_classes[0],
+            *args,
+            **kwargs,
+        )
 
         if self.mask_classification:
-            self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
+            if enable_multilabel:
+                self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
+            elif enable_multiclass and isinstance(num_classes, tuple):
+                assert len(num_classes) == 2
+                self.attributes_embed = nn.Linear(self.hidden_dim, num_classes[1])
+            else:
+                self.attributes_embed = nn.Identity()
+
+        if enable_multiclass:
+            self.mask_embed = nn.ModuleList([
+                MLP(hidden_dim, hidden_dim, mask_dim, 3)
+                for _ in range(num_attributes)
+            ])
+
         self.enable_multilabel = enable_multilabel
+        self.enable_multiclass = enable_multiclass
 
     def dn_post_process(
         self,
@@ -245,21 +271,27 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
         if self.two_stage:
             out['interm_outputs'] = interm_outputs
         return out, mask_dict
-
+    
     def forward_prediction_heads(self, output, mask_features, pred_mask=True):
-        outputs_class, outputs_mask = super().forward_prediction_heads(
-            output, mask_features, pred_mask,
-        )
-
+        # decoder_output = self.decoder_norm(output)  # TODO: again ???
         decoder_output = self.decoder.norm(output)
         decoder_output = decoder_output.transpose(0, 1)
-        
-        if not self.enable_multilabel:
-            with torch.no_grad():
-                outputs_attributes = self.attributes_embed(decoder_output)
-        else:
-            outputs_attributes = self.attributes_embed(decoder_output)
+        outputs_class = self.class_embed(decoder_output)
 
+        outputs_mask = None
+        if pred_mask:
+            if not self.enable_multiclass:
+                mask_embed = self.mask_embed(decoder_output)
+                outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
+            else:
+                outputs_masks = []
+                for mlp in self.mask_embed:
+                    mask_embed = mlp(decoder_output)
+                    outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
+                    outputs_masks.append(outputs_mask)
+                outputs_mask = torch.stack(outputs_masks, dim=2)
+        
+        outputs_attributes = self.attributes_embed(decoder_output)
         
         return outputs_class, outputs_mask, outputs_attributes
 

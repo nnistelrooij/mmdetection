@@ -15,8 +15,7 @@ class MaskDINOMultilabel(MaskDINO):
     def predict(self,
                 batch_inputs: Tensor,
                 batch_data_samples: SampleList,
-                rescale: bool = True) -> SampleList:
-        
+                rescale: bool = True) -> SampleList:        
         feats = self.extract_feat(batch_inputs)
         mask_results = self.panoptic_head.predict(feats, batch_data_samples)
         results_list = self.panoptic_fusion_head.predict(
