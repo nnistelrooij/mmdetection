@@ -13,8 +13,10 @@ class RandomOPGFlip(RandomFlip):
     @autocast_box_type()
     def _flip(self, results: dict) -> None:
         """Flip images, bounding boxes, labels, and semantic segmentation."""
-        labels = results['gt_bboxes_labels'] 
-        results['gt_bboxes_labels'] = np.where((labels % 16) >= 8, labels - 8, labels + 8)
+        labels = results['gt_bboxes_labels']
+        labels = np.where((labels % 16) >= 8, labels - 8, labels + 8)
+
+        results['gt_bboxes_labels'] = labels
 
         super()._flip(results)
 

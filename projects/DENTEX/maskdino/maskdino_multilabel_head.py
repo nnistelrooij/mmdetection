@@ -74,11 +74,14 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         mask_box_results = mask_box_results[None, keep]
         mask_attrs_results = mask_attrs_results[None, keep]
 
-        # upsample masks
-        b, q, c, h, w = mask_pred_results.shape
+        # upsample masks        
+        if self.enable_multiclass:
+            b, q, c, h, w = mask_pred_results.shape
+            mask_pred_results = mask_pred_results.reshape(b, q * c, h, w)
+        
         batch_input_shape = batch_data_samples[0].metainfo['batch_input_shape']
         mask_pred_results = F.interpolate(
-            mask_pred_results.reshape(b, q * c, h, w),
+            mask_pred_results,
             size=batch_input_shape[:2],
             mode='bilinear',
             align_corners=False)

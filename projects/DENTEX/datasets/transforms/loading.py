@@ -1,3 +1,4 @@
+import pycocotools.mask as maskUtils
 import numpy as np
 
 from mmcv.transforms import LoadImageFromFile
@@ -54,6 +55,13 @@ class LoadMulticlassAnnotations(LoadMultilabelAnnotations):
         Args:
             results (dict): Result dict from :obj:``mmengine.BaseDataset``.
         """
+        if isinstance(results['instances'][0]['mask'], list):
+            for instance in results['instances']:
+                mask = 0
+                for i, rle in enumerate(instance['mask']):
+                    mask += 2 ** i * maskUtils.decode(rle)
+                instance['mask'] = mask
+
         h, w = results['ori_shape']
         gt_masks = self._process_masks(results)
         gt_masks = BitmapMasks(gt_masks, h, w)

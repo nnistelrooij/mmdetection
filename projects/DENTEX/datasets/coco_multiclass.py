@@ -1,4 +1,5 @@
 from collections import defaultdict
+import logging
 from pathlib import Path
 from typing import List, Union
 
@@ -24,14 +25,18 @@ class CocoMulticlassDataset(CocoDataset):
     def __init__(
         self,
         metainfo: dict,
+        strict: bool=True,
+        decode_masks: bool=True,
         *args,
         **kwargs,
     ):
         metainfo['fdis'] = CocoMulticlassDataset.FDIs
+        self.strict = strict
+        self.decode_masks = decode_masks
 
         super().__init__(metainfo=metainfo, *args, **kwargs)
 
-    def coco_to_array(
+    def coco_to_rle(
         self,
         mask_ann: Union[list, dict],
         img_h: int,
@@ -60,8 +65,7 @@ class CocoMulticlassDataset(CocoDataset):
         else:
             # rle
             rle = mask_ann
-        mask = maskUtils.decode(rle)
-        return mask
+        return rle
 
     def parse_data_info(self, raw_data_info: dict) -> Union[dict, List[dict]]:
         """Parse raw annotation to target format.
@@ -136,12 +140,17 @@ class CocoMulticlassDataset(CocoDataset):
                 'bbox': np.array([data_info['width'], data_info['height'], 0, 0]),
                 'bbox_label': CocoMulticlassDataset.FDIs.index(fdi),
                 'ignore_flag': anns[0].get('iscrowd', 0),
-                'mask': np.zeros(
-                    (1 + n_attributes, img_info['height'], img_info['width']),
-                    dtype=np.uint8,
-                ),
+                'mask': np.zeros((img_info['height'], img_info['width']), dtype=np.uint8),
                 'bbox_multilabel': np.zeros(n_unique_classes + n_attributes, dtype=int),
             }
+            if self.decode_masks:
+                instance['mask'] = np.tile(instance['mask'][None], (1 + n_attributes, 1, 1))
+            else:
+                instance['mask'] = [
+                    maskUtils.encode(np.asfortranarray(instance['mask']))
+                    for _ in range(1 + n_attributes)
+                ]
+
             for ann in anns:
                 cat_name = ann['category_name']
 
@@ -149,10 +158,14 @@ class CocoMulticlassDataset(CocoDataset):
                     cat_name not in classes and
                     cat_name not in attributes
                 ):
-                    raise ValueError(
+                    msg = (
                         f'Expected category name in {classes + attributes}, '
                         f'but found {ann["category_name"]}.'
                     )
+                    if self.strict:
+                        raise ValueError(msg)
+                    else:
+                        logging.warn(msg)
 
                 if cat_name in classes:
                     instance['bbox'][:2] = np.minimum(
@@ -170,15 +183,22 @@ class CocoMulticlassDataset(CocoDataset):
                     label = 1 + attributes.index(cat_name)
                     label_idx = n_unique_classes + attributes.index(cat_name)
 
-                mask = self.coco_to_array(
+                rle = self.coco_to_rle(
                     ann['segmentation'], img_info['height'], img_info['width'],
                 )
-                index_arrays = np.nonzero(mask)
-                index_arrays = (np.full(index_arrays[0].shape[0], label),) + index_arrays
-                instance['mask'][index_arrays] = 1
+
+                if self.decode_masks:
+                    index_arrays = np.nonzero(maskUtils.decode(rle))
+                    index_arrays = (np.full(index_arrays[0].shape[0], label),) + index_arrays
+                    instance['mask'][index_arrays] = 1
+                else:
+                    instance['mask'][label] = maskUtils.merge([instance['mask'][label], rle])
+
                 instance['bbox_multilabel'][label_idx] = 1
           
-            instance['mask'] = sum(2 ** i * mask for i, mask in enumerate(instance['mask']))
+            if self.decode_masks:
+                instance['mask'] = sum(2 ** i * mask for i, mask in enumerate(instance['mask']))
+                
             instances.append(instance)
 
         for instance in instances:

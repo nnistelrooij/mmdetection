@@ -1,6 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import cv2
 
@@ -55,7 +55,7 @@ class PNGsDataset(BaseDetDataset):
 
     def __init__(
         self,
-        mha_meta_file,
+        mha_meta_file: Optional[str]=None,
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)

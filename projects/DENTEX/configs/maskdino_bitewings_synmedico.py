@@ -1,20 +1,18 @@
 _base_ = './maskdino_r50_coco_multilabel.py'
 # _base_ = './maskdino_swin-l_coco_multilabel.py'
 
-data_root = '/home/mkaailab/Documents/Promaton/'
-data_root = '/home/mkaailab/.darwin/datasets/mucoaid/promaton/'
-split = 'promaton_diagnoses_extra'
-fold = 1
+data_root = '/home/mkaailab/.darwin/datasets/mucoaid/synmedico/'
+split = 'synmedico_all'
+fold = 0
 data_prefix = dict(img=data_root + 'images')
 work_dir = f'work_dirs/opgs_fold_{split}_{fold}/'
 phase = 'train'
 
 classes = [
-    'TOOTH', 'IMPACTED', 'ROOT_REMNANTS', 'CROWN', 'DENTAL_IMPLANT',
+    'TOOTH',
 ]
 attributes = [
-    'CROWN', 'DENTAL_IMPLANT', 'CARIES', 'PERIAPICAL_RADIOLUCENT',
-    'CROWN_FILLING', 'ROOT_CANAL_FILLING',
+    'crowns', 'bridges', 'implants', 'fillings', 'caries', 'roots', 'calculus',
 ]
 num_classes = 32, len(classes)
 num_attributes = 1 + len(attributes)
@@ -23,17 +21,19 @@ num_upper_masks = 1 + len(set(classes) & set(attributes))
 
 train_dataloader = dict(
     batch_size=2,
-    # num_workers=0,
+    num_workers=5,
     # persistent_workers=False,
     dataset=dict(dataset=dict(dataset=dict(
         type='CocoMulticlassDataset',
+        strict=False,
+        decode_masks=False,
         ann_file=data_root + f'train_{split}_{fold}.json',
         # ann_file=data_root + f'test_{split}.json',
         data_prefix=data_prefix,
         data_root=data_root,
         metainfo=dict(classes=classes, attributes=attributes),
         pipeline=[
-            dict(type='LoadUInt16ImageFromFile'),
+            dict(type='LoadImageFromFile'),
             dict(type='LoadMulticlassAnnotations', with_bbox=True, with_mask=True),
         ],
     ))),
@@ -41,7 +41,7 @@ train_dataloader = dict(
 
 val_pipeline = [
     dict(
-        type='LoadUInt16ImageFromFile',
+        type='LoadImageFromFile',
     ),
     dict(
         type='Resize',
@@ -55,31 +55,31 @@ val_pipeline = [
 ]
 val_dataloader = dict(dataset=dict(
     type='CocoMulticlassDataset',
+    strict=False,
+    decode_masks=False,
     ann_file=data_root + f'val_{split}_{fold}.json',
     data_prefix=data_prefix,
     data_root=data_root,
     metainfo=dict(classes=classes, attributes=attributes),
     pipeline=val_pipeline,
 ))
-val_evaluator = dict(
-    _delete_=True,
-    type='CocoMetric',
-    ann_file=data_root + f'val_{split}_{fold}.json',
-    metric=['bbox', 'segm'],
-)
-val_dataloader = None
-val_evaluator = None
-val_cfg = None
+val_evaluator = [
+    dict(
+        type='CocoMulticlassMetric',
+        metric=['bbox', 'segm'],
+        class_agnostic=False,
+        prefix='fdi_label',
+    ),
+]
 
 test_dataloader = dict(
     num_workers=1,
     persistent_workers=False,
     dataset=dict(
         type='CocoMulticlassDataset',
+        strict=False,
         ann_file=data_root + f'val_{split}_{fold}.json',
         # ann_file=data_root + f'test_{split}.json',
-        # ann_file=data_root + f'train_{split}_{fold}.json',
-        # ann_file=ann_prefix + 'val_dentex_diagnosis_0.json',
         data_prefix=data_prefix,
         data_root=data_root,
         metainfo=dict(classes=classes, attributes=attributes),
@@ -88,34 +88,33 @@ test_dataloader = dict(
 )
 test_evaluator = [
     dict(
-        type='CocoMetric',
-        ann_file=data_root + f'val_{split}_{fold}.json',
-        # ann_file=data_root + f'test_{split}.json',
-        # ann_file=data_root + f'train_{split}_{fold}.json',
-        # ann_file=ann_prefix + 'val_dentex_diagnosis_0.json',
+        type='CocoMulticlassMetric',
         metric=['bbox', 'segm'],
         class_agnostic=True,
         prefix='class_agnostic',
     ),
     dict(
-        type='CocoMetric',
-        ann_file=data_root + f'val_{split}_{fold}.json',
-        # ann_file=data_root + f'test_{split}.json',
-        # ann_file=ann_prefix + 'val_dentex_diagnosis_0.json',
+        type='CocoMulticlassMetric',
         metric=['bbox', 'segm'],
         class_agnostic=False,
         prefix='fdi_label',
     ),
-    dict(
-        type='DumpNumpyDetResults',
-        out_file_path=(
-            'detection_odo_4.pkl'
-            if 'dentex' in test_dataloader['dataset']['ann_file'] else
-            work_dir + 'detection.pkl'            
-        ),
-    ),
+    *[
+        dict(
+            type='SingleLabelMetric',
+            label_idx=i,
+            prefix=(classes + attributes)[i]
+        ) for i in range(len(classes + attributes))
+    ],
+    # dict(
+    #     type='DumpNumpyDetResults',
+    #     out_file_path=(
+    #         'detection_odo_4.pkl'
+    #         if 'dentex' in test_dataloader['dataset']['ann_file'] else
+    #         work_dir + 'detection.pkl'            
+    #     ),
+    # ),
 ]
-test_evaluator = []
 
 custom_hooks = []
 model = dict(
@@ -171,7 +170,7 @@ tta_model = dict(
 )
 
 default_hooks = dict(checkpoint=dict(
-    save_best='coco/segm_mAP',
+    save_best='fdi_label/segm_mAP',
 ))
 
 visualizer = dict(type='MulticlassDetLocalVisualizer')

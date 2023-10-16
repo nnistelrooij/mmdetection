@@ -52,11 +52,12 @@ class MultilabelDetLocalVisualizer(DetLocalVisualizer):
                 else self.bbox_color
             bbox_palette = get_palette(bbox_color, max_label + 1)
             colors = [bbox_palette[label] for label in labels]
-            # self.draw_bboxes(
-            #     bboxes,
-            #     edge_colors=colors,
-            #     alpha=self.alpha,
-            #     line_widths=self.line_width)
+            if 'masks' not in instances:
+                self.draw_bboxes(
+                    bboxes,
+                    edge_colors=colors,
+                    alpha=self.alpha,
+                    line_widths=self.line_width)
 
             positions = bboxes[:, :2] + self.line_width
             areas = (bboxes[:, 3] - bboxes[:, 1]) * (

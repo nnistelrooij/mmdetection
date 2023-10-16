@@ -189,7 +189,6 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         results.bboxes = mask_box
         results.labels = labels_per_image
         results.logits = mask_cls
-        results.multilogits = mask_attributes
         results.scores = det_scores if not focus_on_box else 1.0
 
         if self.enable_multiclass:
@@ -197,14 +196,17 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         else:
             results.masks = mask_pred_binary.bool()
 
-        if self.enable_multilabel:
-            results.multilabels = attributes_per_image
-        elif self.enable_multiclass:
-            results.multilabels = torch.column_stack((
-                mask_attributes >= 0,
-                mask_pred[:, self.num_upper_masks:].amax(dim=(-2, -1)) >= 0,
+        if self.enable_multiclass:
+            results.multilogits = torch.column_stack((
+                mask_attributes,
+                mask_pred[:, self.num_upper_masks:].amax(dim=(-2, -1))
             ))
         else:
-            results.multilabels = mask_attributes > 0
+            results.multilogits = mask_attributes
+
+        if self.enable_multilabel:
+            results.multilabels = attributes_per_image
+        else:
+            results.multilabels = results.multilogits >= 0
 
         return results
