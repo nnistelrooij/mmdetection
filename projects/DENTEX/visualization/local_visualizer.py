@@ -270,7 +270,9 @@ class MulticlassDetLocalVisualizer(DetLocalVisualizer):
                     counts[-1] += len(mask)
                 else:
                     raise ValueError(f'Expected np.uint8 or np.bool_ dtype, but found {mask.dtype}')
-            binary_masks = np.stack(binary_masks)
+            binary_masks = np.stack(binary_masks) if binary_masks else (
+                np.zeros((1, image.shape[0], image.shape[1]), dtype=bool)
+            )
 
             mask_colors = []
             for i in range(binary_masks.shape[0]):

@@ -68,7 +68,7 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         mask_box_results = outputs["pred_boxes"]
         mask_attrs_results = outputs["pred_multilabel_logits"]
 
-        keep = mask_cls_results.amax(dim=2).sigmoid() >= 0.05
+        keep = mask_cls_results.amax(dim=2).sigmoid() >= 1e-3
         mask_cls_results = mask_cls_results[None, keep]
         mask_pred_results = mask_pred_results[None, keep]
         mask_box_results = mask_box_results[None, keep]

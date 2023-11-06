@@ -234,8 +234,12 @@ class QualityFocalLoss(nn.Module):
             if isinstance(target, torch.Tensor):
                 # the target shape with (N,C) or (N,C,...), which means
                 # the target is one-hot form with soft weights.
+                target = F.one_hot(target, num_classes=pred.shape[1] + 1)
+                target = target[:, :pred.shape[1]]
                 calculate_loss_func = partial(
                     quality_focal_loss_tensor_target, activated=self.activated)
+
+            
 
             loss_cls = self.loss_weight * calculate_loss_func(
                 pred,

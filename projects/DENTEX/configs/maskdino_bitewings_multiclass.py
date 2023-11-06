@@ -2,7 +2,7 @@ _base_ = './maskdino_r50_coco_multilabel.py'
 # _base_ = './maskdino_swin-l_coco_multilabel.py'
 
 data_root = '/home/mkaailab/.darwin/datasets/mucoaid/synmedico/'
-split = 'synmedico_all'
+split = 'synmedico_small'
 fold = 0
 data_prefix = dict(img=data_root + 'images')
 work_dir = f'work_dirs/opgs_fold_{split}_{fold}/'

@@ -135,3 +135,45 @@ class DumpNumpyDetResults(DumpResults):
                     'Suggest using `CocoPanopticMetric` to save the coco '
                     'format json and segmentation png files directly.')
         self.results.extend(data_samples)
+
+
+@METRICS.register_module()
+class DumpMulticlassDetResults(DumpResults):
+
+    def __init__(
+        self,
+        score_thr: float=0.1,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        self.score_thr = score_thr
+
+    def process(self, data_batch: dict, data_samples: Sequence[dict]) -> None:
+        """transfer tensors in predictions to CPU."""
+        data_samples = _to_cpu(data_samples)
+        for data_sample in data_samples:
+            data_sample.pop('ignored_instances', None)
+            data_sample.pop('gt_instances', None)
+            data_sample.pop('gt_panoptic_seg', None)
+
+            if 'pred_instances' in data_sample:
+                pred = data_sample['pred_instances']
+
+                keep, max_std = pred['scores'] >= self.score_thr, 0.0
+
+                pred['scores'] = pred['scores'][keep]
+                pred['bboxes'] = pred['bboxes'][keep]
+                pred['logits'] = pred['logits'][keep]
+                pred['labels'] = pred['labels'][keep]
+                pred['masks'] = [
+                    encode_mask_results(mask)
+                    for mask in pred['masks'][keep].numpy()
+                ]
+
+                MMLogger.get_current_instance().warn(
+                    f'Scan {data_sample["img_path"].name} Teeth: {keep.sum()} STD: {max_std}',
+                )
+
+        self.results.extend(data_samples)

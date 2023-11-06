@@ -113,6 +113,19 @@ class CocoMulticlassDataset(CocoDataset):
 
         fdi2anns = defaultdict(list)
         for ann in ann_info:
+            x1, y1, w, h = ann['bbox']
+            inter_w = max(0, min(x1 + w, img_info['width']) - max(x1, 0))
+            inter_h = max(0, min(y1 + h, img_info['height']) - max(y1, 0))
+            if (
+                inter_w * inter_h == 0 or
+                ann['area'] <= 0 or w < 1 or h < 1
+            ):
+                if self.strict:
+                    MMLogger.get_current_instance().error(
+                        f'{img_info["file_name"]} has empty segmentation'
+                    )
+                continue
+
             cat_name = self.coco.cats[ann['category_id']]['name']
             if 'CROWN' in cat_name:
                 ann['category_name'] = 'CROWN'
@@ -123,16 +136,6 @@ class CocoMulticlassDataset(CocoDataset):
             fdi = int(cat_name[-2:])
             fdi2anns[fdi] = fdi2anns[fdi] + [ann]
 
-            x1, y1, w, h = ann['bbox']
-            inter_w = max(0, min(x1 + w, img_info['width']) - max(x1, 0))
-            inter_h = max(0, min(y1 + h, img_info['height']) - max(y1, 0))
-            if (
-                inter_w * inter_h == 0 or
-                ann['area'] <= 0 or w < 1 or h < 1
-            ):
-                MMLogger.get_current_instance().error(
-                    f'{img_info["file_name"]} has empty segmentation'
-                )
 
         instances = []
         for fdi, anns in fdi2anns.items():
@@ -163,9 +166,9 @@ class CocoMulticlassDataset(CocoDataset):
                         f'but found {ann["category_name"]}.'
                     )
                     if self.strict:
-                        raise ValueError(msg)
-                    else:
                         logging.warn(msg)
+                    
+                    continue
 
                 if cat_name in classes:
                     instance['bbox'][:2] = np.minimum(
@@ -201,14 +204,17 @@ class CocoMulticlassDataset(CocoDataset):
                 
             instances.append(instance)
 
+        clean_instances = []
         for instance in instances:
             if np.any(instance['bbox_multilabel'][:len(classes)]):
+                clean_instances.append(instance)
                 continue
+            
+            if self.strict:
+                MMLogger.get_current_instance().error(
+                    f'{img_info["file_name"]} is missing tooth with diagnosis'
+                )
 
-            MMLogger.get_current_instance().error(
-                f'{img_info["file_name"]} is missing tooth with diagnosis'
-            )
-
-        data_info['instances'] = instances
+        data_info['instances'] = clean_instances
         
         return data_info

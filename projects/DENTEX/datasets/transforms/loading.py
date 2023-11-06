@@ -55,6 +55,9 @@ class LoadMulticlassAnnotations(LoadMultilabelAnnotations):
         Args:
             results (dict): Result dict from :obj:``mmengine.BaseDataset``.
         """
+        if 'instances' not in results or not results['instances']:
+            return results
+
         if isinstance(results['instances'][0]['mask'], list):
             for instance in results['instances']:
                 mask = 0
