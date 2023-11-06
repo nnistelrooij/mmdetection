@@ -66,9 +66,13 @@ class CocoDataset(BaseDetDataset):
             self.coco = self.COCOAPI(local_path)
         # The order of returned `cat_ids` will not
         # change with the order of the `classes`
-        self.cat_ids = self.coco.get_cat_ids(
-            cat_names=self.metainfo['classes'])
-        self.cat2label = {cat_id: i for i, cat_id in enumerate(self.cat_ids)}
+        catname2id = {cat['name']: cat['id'] for cat in self.coco.cats.values()}
+        self.cat2label = {
+            catname2id[cat_name]: i
+            for i, cat_name in enumerate(self.metainfo['classes'])
+            if cat_name in catname2id
+        }
+        self.cat_ids = list(self.cat2label.keys())
         self.cat_img_map = copy.deepcopy(self.coco.cat_img_map)
 
         img_ids = self.coco.get_img_ids()
