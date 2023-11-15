@@ -10,6 +10,16 @@ from mmdet.registry import DATASETS
 @DATASETS.register_module()
 class InstanceBalancedDataset(ClassBalancedDataset):
 
+    def __init__(
+        self,
+        key: str='bbox_multilabel',
+        *args,
+        **kwargs,
+    ):
+        self.key = key
+        
+        super().__init__(*args, **kwargs)
+
     def _get_repeat_factors(self, dataset, repeat_thr):
         # 1. For each category c, compute the fraction # of images
         #   that contain it: f(c)
@@ -21,20 +31,24 @@ class InstanceBalancedDataset(ClassBalancedDataset):
             if not instances:
                 continue
 
-            attributes = np.stack([ann['bbox_multilabel'] for ann in instances])
+            attributes = np.stack([ann[self.key] for ann in instances])
+            if attributes.ndim == 1:
+                temp = np.zeros((attributes.shape[0], attributes.max() + 1))
+                temp[np.arange(attributes.shape[0]), attributes] = 1
+                attributes = temp.astype(int)
 
             attributes = attributes[np.any(attributes, axis=-1)]
 
             cat_ids = set()
             for multilabel in attributes:
                 cat_id = sum(2**i * label for i, label in enumerate(multilabel))
-                bbox_freq[cat_id] += 1
+                bbox_freq[cat_id] = bbox_freq[cat_id] + 1
                 num_bboxes += 1
 
                 cat_ids.add(cat_id)
 
             for cat_id in cat_ids:
-                image_freq[cat_id] += 1
+                image_freq[cat_id] = image_freq[cat_id] + 1
 
         for k, v in image_freq.items():
             image_freq[k] = v / num_images
@@ -56,7 +70,11 @@ class InstanceBalancedDataset(ClassBalancedDataset):
                 repeat_factors.append(1.0)
                 continue
             
-            attributes = np.stack([ann['bbox_multilabel'] for ann in instances])
+            attributes = np.stack([ann[self.key] for ann in instances])
+            if attributes.ndim == 1:
+                temp = np.zeros((attributes.shape[0], attributes.max() + 1))
+                temp[np.arange(attributes.shape[0]), attributes] = 1
+                attributes = temp.astype(int)
             attributes = attributes[np.any(attributes, axis=-1)]
 
             if not np.any(attributes):

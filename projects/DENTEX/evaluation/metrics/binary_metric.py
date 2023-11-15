@@ -119,6 +119,8 @@ class SingleLabelMetric(BaseMetric):
                  items: Sequence[str] = ('precision', 'recall', 'f1-score'),
                  average: Optional[str] = 'macro',
                  num_classes: Optional[int] = None,
+                 iou_type: str='segm',
+                 score_thr: float=0.3,
                  collect_device: str = 'cpu',
                  prefix: Optional[str] = None) -> None:
 
@@ -140,18 +142,25 @@ class SingleLabelMetric(BaseMetric):
         self.items = tuple(items)
         self.average = average
         self.num_classes = num_classes
-
+        assert iou_type in ['bbox', 'segm'], 'iou_type must be "bbox" or "segm"'
+        self.iou_type = iou_type
+        self.score_thr = score_thr
 
     def match_instances(self, pred_instances, gt_instances, iou_thr: float=0.5):
-        pred_masks = pred_instances['masks'][:, 0].cpu().numpy()
-        pred_rles = [maskUtils.encode(np.asfortranarray(mask)) for mask in pred_masks]
-        gt_masks = gt_instances['masks'].masks & 1
-        gt_rles = [maskUtils.encode(np.asfortranarray(mask)) for mask in gt_masks]
+        if self.iou_type == 'bbox':
+            preds = pred_instances['bboxes'].cpu().numpy()
+            preds[:, 2:] -= preds[:, :2]
+            gts = gt_instances['bboxes'].cpu().numpy()
+            gts[:, 2:] -= gts[:, :2]
+        else:
+            pred_masks = pred_instances['masks'][:, 0].cpu().numpy()
+            preds = [maskUtils.encode(np.asfortranarray(mask)) for mask in pred_masks]
+            gt_masks = gt_instances['masks'].masks & 1
+            gts = [maskUtils.encode(np.asfortranarray(mask)) for mask in gt_masks]
         
-        ious = maskUtils.iou(pred_rles, gt_rles, [0]*len(gt_rles))
+        ious = maskUtils.iou(preds, gts, [0]*len(gts))
         
         return np.column_stack(np.nonzero(ious >= iou_thr))
-
 
     def process(self, data_batch, data_samples: Sequence[dict]):
         """Process one batch of data samples.
@@ -168,10 +177,14 @@ class SingleLabelMetric(BaseMetric):
             pred = data_sample['pred_instances']
             gt = data_sample['gt_instances']
 
+            keep_pred = pred['scores'] >= self.score_thr
             for pred_idx, gt_idx in self.match_instances(pred, gt):
+                if not keep_pred[pred_idx]:
+                    continue
+
                 result = {
-                    'gt_label': gt['multilabels'][gt_idx][self.idx].reshape(-1),
-                    'pred_label': pred['multilabels'][pred_idx][self.idx].reshape(-1),
+                    'gt_label': gt['attributes'][gt_idx][self.idx].reshape(-1),
+                    'pred_label': pred['attributes'][pred_idx][self.idx].reshape(-1),
                     'pred_score': torch.stack((
                         1 - pred['multilogits'][pred_idx][self.idx],
                         pred['multilogits'][pred_idx][self.idx],
@@ -181,6 +194,9 @@ class SingleLabelMetric(BaseMetric):
                 self.results.append(result)
                 
     def compute_metrics(self, results: List):
+        if not results:
+            return {}
+        
         # determine and draw ROC curve of results
         self.steps += 1
         roc_metrics = draw_roc_curve(self.results, self.prefix, self.steps)
@@ -196,6 +212,6 @@ class SingleLabelMetric(BaseMetric):
 
         if self.average is not None:
             metrics = {**roc_metrics, **cm_metrics}
-            return {f'{self.prefix}/{k}': v for k, v in metrics.items()}
+            return {f'{k}': v for k, v in metrics.items()}
 
         return {}
