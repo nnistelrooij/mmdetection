@@ -28,6 +28,7 @@ train_dataloader = dict(
         type='CocoMulticlassDataset',
         strict=False,
         decode_masks=False,
+        num_workers=16,  # -1
         ann_file=data_root + f'train_{split}_{fold}.json',
         # ann_file=data_root + f'test_{split}.json',
         data_prefix=data_prefix,
