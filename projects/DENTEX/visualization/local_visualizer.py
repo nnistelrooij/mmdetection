@@ -190,7 +190,7 @@ class MulticlassDetLocalVisualizer(DetLocalVisualizer):
             np.ndarray: the drawn image which channel is RGB.
         """
         self.set_image(image)
-        instances.pop('multilabels')
+        instances.pop('multilabels', None)
 
         if 'bboxes' in instances:
             bboxes = instances.bboxes

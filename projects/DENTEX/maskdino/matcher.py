@@ -54,7 +54,6 @@ class HungarianMatcher(nn.Module):
 
         self.panoptic_on = panoptic_on
         self.enable_multiclass = enable_multiclass
-        self.class_labels = torch.tensor(class_labels).to('cuda')
 
         assert cost_class != 0 or cost_mask != 0 or cost_dice != 0, "all costs cant be 0"
 
