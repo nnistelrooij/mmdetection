@@ -708,6 +708,11 @@ class RandomCrop(BaseTransform):
         crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
         crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
 
+        crop_y1 = np.clip(crop_y1, 0, img.shape[0])
+        crop_y2 = np.clip(crop_y2, 0, img.shape[0])
+        crop_x1 = np.clip(crop_x1, 0, img.shape[1])
+        crop_x2 = np.clip(crop_x2, 0, img.shape[1])
+
         # Record the homography matrix for the RandomCrop
         homography_matrix = np.array(
             [[1, 0, -offset_w], [0, 1, -offset_h], [0, 0, 1]],

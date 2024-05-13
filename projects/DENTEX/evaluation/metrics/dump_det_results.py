@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from pathlib import Path
 import warnings
 from typing import Sequence
 
@@ -32,12 +33,14 @@ class DumpNumpyDetResults(DumpResults):
     def __init__(
         self,
         score_thr: float=0.1,
+        filter_wrong_arch: bool=True,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
 
         self.score_thr=score_thr
+        self.filter_wrong_arch = filter_wrong_arch
 
     def means_stds_maxs(
         self,
@@ -104,14 +107,16 @@ class DumpNumpyDetResults(DumpResults):
                 gt = data_sample['gt_instances']
                 # encode mask to RLE
                 if 'masks' in gt:
-                    gt['masks'] = encode_mask_results(gt['masks'].masks)
+                    gt['masks'] = encode_mask_results(gt['masks'])
 
             if 'pred_instances' in data_sample:
                 pred = data_sample['pred_instances']
 
                 keep1, same, max_std = pred['scores'] >= self.score_thr, True, 0.0
-                keep, same, max_std = self.wrong_arch_idxs(pred, keep1.clone())
-                # keep = keep1
+                if self.filter_wrong_arch:
+                    keep, same, max_std = self.wrong_arch_idxs(pred, keep1.clone())
+                else:
+                    keep = keep1
 
                 if not same:
                     MMLogger.get_current_instance().warn(
@@ -120,12 +125,15 @@ class DumpNumpyDetResults(DumpResults):
 
                 pred['scores'] = pred['scores'][keep]
                 pred['bboxes'] = pred['bboxes'][keep]
-                pred['logits'] = pred['logits'][keep]
+                if 'logits' in pred:
+                    pred['logits'] = pred['logits'][keep]
                 pred['labels'] = pred['labels'][keep]
                 pred['masks'] = encode_mask_results(pred['masks'][keep].numpy())
 
+                path = data_sample['img_path']
+                path = path.name if isinstance(path, Path) else path
                 MMLogger.get_current_instance().warn(
-                    f'Scan {data_sample["img_path"].name} Teeth: {keep.sum()} STD: {max_std}',
+                    f'Scan {path} Teeth: {keep.sum()} STD: {max_std}',
                 )
                     
             if 'pred_panoptic_seg' in data_sample:
@@ -155,9 +163,21 @@ class DumpMulticlassDetResults(DumpResults):
         data_samples = _to_cpu(data_samples)
         for data_sample in data_samples:
             data_sample.pop('ignored_instances', None)
-            data_sample.pop('gt_instances', None)
             data_sample.pop('gt_panoptic_seg', None)
 
+            if 'gt_instances' in data_sample:
+                gt = data_sample['gt_instances']
+                if gt['masks'].masks.dtype == np.bool_:
+                    gt['masks'] = [
+                        encode_mask_results(mask)
+                        for mask in gt['masks'].masks
+                    ]
+                elif gt['masks'].masks.dtype == np.uint8:
+                    gt['masks'] = [
+                        encode_mask_results([mask == i for i in range(1, 9)])
+                        for mask in gt['masks'].masks
+                    ]
+            
             if 'pred_instances' in data_sample:
                 pred = data_sample['pred_instances']
 
@@ -167,10 +187,16 @@ class DumpMulticlassDetResults(DumpResults):
                 pred['bboxes'] = pred['bboxes'][keep]
                 pred['logits'] = pred['logits'][keep]
                 pred['labels'] = pred['labels'][keep]
-                pred['masks'] = [
-                    encode_mask_results(mask)
-                    for mask in pred['masks'][keep].numpy()
-                ]
+                if pred['masks'].dtype == torch.bool:
+                    pred['masks'] = [
+                        encode_mask_results(mask)
+                        for mask in pred['masks'][keep].numpy()
+                    ]
+                elif pred['masks'].dtype == torch.int64:
+                    pred['masks'] = [
+                        encode_mask_results([mask == i for i in range(1, 9)])
+                        for mask in pred['masks'][keep].numpy()
+                    ]
 
                 MMLogger.get_current_instance().warn(
                     f'Scan {data_sample["img_path"].name} Teeth: {keep.sum()} STD: {max_std}',

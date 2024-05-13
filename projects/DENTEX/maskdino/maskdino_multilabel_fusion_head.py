@@ -191,22 +191,44 @@ class MaskDINOMultilabelFusionHead(MaskDINOFusionHead):
         results.logits = mask_cls
         results.scores = det_scores if not focus_on_box else 1.0
 
-        if self.enable_multiclass:
+        if self.enable_multiclass and self.enable_multilabel:
             results.masks = mask_pred >= 0
+        elif self.enable_multiclass and not self.enable_multilabel:
+            fg_mask = torch.softmax(mask_pred, axis=1)
+
+            attrs = torch.arange(mask_pred.shape[1])[:, None, None].to(fg_mask)
+            thresholds = [0.1, 0.1, 0.0891, 0.3153, 0.4204, 0.1642, 0.1862, 0.0360, 0.0951]
+            thresholds = torch.tensor(thresholds)[:, None, None].to(fg_mask)
+            try:
+                results.masks = ((fg_mask >= thresholds) * attrs).argmax(1)
+            except Exception:
+                results.masks = ((fg_mask >= 0.1) * attrs).argmax(1)
         else:
             results.masks = mask_pred_binary.bool()
 
-        if self.enable_multiclass:
-            results.multilogits = torch.column_stack((
+        if not self.enable_multiclass:
+            results.multilogits = mask_attributes
+        elif not self.enable_multilabel:
+            fg_mask[fg_mask < 0.01] = 0.0
+            multiprobs = fg_mask.sum((-2, -1)) / (fg_mask > 0.0).sum((-2, -1))
+            multiprobs[torch.isnan(multiprobs)] = 0.0
+
+            results.multilogits = multiprobs[:, 1:]
+        if not self.enable_multiclass:
+            results.multilabels = attributes_per_image
+        elif self.enable_multilabel:
+            results.multilabels = torch.column_stack((
                 mask_attributes,
                 mask_pred[:, self.num_upper_masks:].amax(dim=(-2, -1))
+            )) >= 0
+        else:
+            mask_labels = torch.arange(1 + self.num_upper_masks, mask_pred.shape[1])
+            results.multilabels = torch.column_stack((
+                mask_attributes > 0,
+                torch.any(torch.any(input=(
+                    results.masks[:, None] ==
+                    mask_labels.to(mask_pred)[:, None, None]
+                ), dim=2), dim=2),
             ))
-        else:
-            results.multilogits = mask_attributes
-
-        if self.enable_multilabel:
-            results.multilabels = attributes_per_image
-        else:
-            results.multilabels = results.multilogits >= 0
 
         return results

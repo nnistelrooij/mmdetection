@@ -50,9 +50,14 @@ class CocoMulticlassMetric(CocoMetric):
             result['labels'] = pred['labels'].cpu().numpy()
             # encode mask to RLE
             if 'masks' in pred:
-                result['masks'] = encode_mask_results(
-                    pred['masks'][:, 0].detach().cpu().numpy()) if isinstance(
-                        pred['masks'], torch.Tensor) else pred['masks']
+                if isinstance(pred['masks'], torch.Tensor) and pred['masks'].ndim == 4:
+                    masks = pred['masks'].amax(1)
+                    result['masks'] = encode_mask_results(masks.detach().cpu().numpy())
+                elif isinstance(pred['masks'], torch.Tensor) and pred['masks'].ndim == 3:
+                    masks = (0 < pred['masks']) & (pred['masks'] < 8)
+                    result['masks'] = encode_mask_results(masks.detach().cpu().numpy())
+                else:
+                    result['masks'] = pred['masks']
             # some detectors use different scores for bbox and mask
             if 'mask_scores' in pred:
                 result['mask_scores'] = pred['mask_scores'].cpu().numpy()
@@ -66,7 +71,7 @@ class CocoMulticlassMetric(CocoMetric):
             for bbox, label, mask in zip(*[
                 data_sample['gt_instances'][k] for k in ['bboxes', 'labels', 'masks']
             ]):
-                rle = encode_mask_results([mask & 1])[0]
+                rle = encode_mask_results([(0 < mask) & (mask < 8)])[0]
                 instance = {
                     'bbox': bbox.tolist(),
                     'bbox_label': label.item(),

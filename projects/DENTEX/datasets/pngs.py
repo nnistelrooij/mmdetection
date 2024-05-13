@@ -68,6 +68,7 @@ class PNGsDataset(BaseDetDataset):
         """  # noqa: E501        
         file_paths = sorted(Path(self.data_prefix['img']).glob('*.png'))
         file_paths += sorted(Path(self.data_prefix['img']).glob('*.jpg'))
+        file_paths += sorted(Path(self.data_prefix['img']).glob('*.jpeg'))
         
         data_list = []
         for img_id, file_path in enumerate(file_paths, 1):

@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Dict, List, Optional, Sequence, Union
 
 import matplotlib.pyplot as plt
@@ -23,10 +24,13 @@ def draw_roc_curve(
     results,
     prefix,
     steps=0,
-    specificity_range=[0.9, 1.0],
-    thr_range=[0.2, 0.8],
-    thr_method: str='er',
+    specificity_range=[0.0, 1.0],
+    thr_range=[0.0, 1.0],
+    thr_method: str='f1',
 ) -> Dict[str, float]:
+    if 'pred_score' not in results[0]:
+        return None
+
     pred_scores = torch.stack([r['pred_score'][1] for r in results]).cpu().numpy()
     gt_labels = torch.cat([r['gt_label'] for r in results]).cpu().numpy()
 
@@ -87,7 +91,10 @@ def draw_confusion_matrix(
     prefix,
     steps=0,
 ):
-    pred_labels = torch.stack([r['pred_score'][1] >= thr for r in results]).cpu().numpy()
+    if thr is not None:
+        pred_labels = torch.stack([r['pred_score'][1] >= thr for r in results]).cpu().numpy()
+    else:
+        pred_labels = torch.cat([r['pred_label'] for r in results]).cpu().numpy()
     gt_labels = torch.cat([r['gt_label'] for r in results]).cpu().numpy()
 
     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
@@ -121,6 +128,7 @@ class SingleLabelMetric(BaseMetric):
                  num_classes: Optional[int] = None,
                  iou_type: str='segm',
                  score_thr: float=0.3,
+                 remove_irrelevant: bool=False,
                  collect_device: str = 'cpu',
                  prefix: Optional[str] = None) -> None:
 
@@ -145,6 +153,7 @@ class SingleLabelMetric(BaseMetric):
         assert iou_type in ['bbox', 'segm'], 'iou_type must be "bbox" or "segm"'
         self.iou_type = iou_type
         self.score_thr = score_thr
+        self.remove_irrelevant = remove_irrelevant
 
     def match_instances(self, pred_instances, gt_instances, iou_thr: float=0.5):
         if self.iou_type == 'bbox':
@@ -153,9 +162,14 @@ class SingleLabelMetric(BaseMetric):
             gts = gt_instances['bboxes'].cpu().numpy()
             gts[:, 2:] -= gts[:, :2]
         else:
-            pred_masks = pred_instances['masks'][:, 0].cpu().numpy()
+            if pred_instances['masks'].dtype == torch.bool:
+                pred_masks = pred_instances['masks'].amax(1).cpu().numpy()
+                gt_masks = gt_instances['masks'].masks > 0
+            else:
+                pred_masks = (pred_instances['masks'] > 0).cpu().numpy()
+                gt_masks = gt_instances['masks'].masks > 0
+
             preds = [maskUtils.encode(np.asfortranarray(mask)) for mask in pred_masks]
-            gt_masks = gt_instances['masks'].masks & 1
             gts = [maskUtils.encode(np.asfortranarray(mask)) for mask in gt_masks]
         
         ious = maskUtils.iou(preds, gts, [0]*len(gts))
@@ -183,12 +197,12 @@ class SingleLabelMetric(BaseMetric):
                     continue
 
                 result = {
-                    'gt_label': gt['attributes'][gt_idx][self.idx].reshape(-1),
-                    'pred_label': pred['attributes'][pred_idx][self.idx].reshape(-1),
-                    'pred_score': torch.stack((
+                    'gt_label': gt['multilabels'][gt_idx, self.idx].reshape(-1),
+                    'pred_label': pred['multilabels'][pred_idx, self.idx].reshape(-1),
+                    **({'pred_score': torch.stack((
                         1 - pred['multilogits'][pred_idx][self.idx],
                         pred['multilogits'][pred_idx][self.idx],
-                    )),
+                    ))} if 'multilogits' in pred else {}),
                     'num_classes': 2,
                 }
                 self.results.append(result)
@@ -201,17 +215,51 @@ class SingleLabelMetric(BaseMetric):
         self.steps += 1
         roc_metrics = draw_roc_curve(self.results, self.prefix, self.steps)
 
-        if roc_metrics is None:
-            return {}
-
-        thr = roc_metrics['optimal_thr']
+        thr = roc_metrics['optimal_thr'] if roc_metrics is not None else None
         cm_metrics = draw_confusion_matrix(self.results, thr, self.prefix, self.steps)
 
         self.results.clear()
 
 
         if self.average is not None:
-            metrics = {**roc_metrics, **cm_metrics}
+            metrics = {**(roc_metrics if roc_metrics is not None else {}), **cm_metrics}
             return {f'{k}': v for k, v in metrics.items()}
 
         return {}
+
+
+@METRICS.register_module()
+class AggregateLabelMetric(BaseMetric):
+
+    def __init__(
+        self,
+        label_idxs: List[int],
+        prefixes: List[str],
+        **kwargs,
+    ):
+        super().__init__(prefix='aggregate')
+
+        self.single_metrics = [
+            SingleLabelMetric(label_idx, prefix=prefix) for
+            label_idx, prefix in zip(label_idxs, prefixes)
+        ]
+
+    def process(self, data_batch, data_samples: Sequence[dict]):
+        for metric in self.single_metrics:
+            metric.process(data_batch, data_samples)
+
+    def compute_metrics(self, results: List):
+        metrics = {}
+        agg_metrics = defaultdict(list)
+        for metric in self.single_metrics:
+            metric_dict = metric.compute_metrics(metric.results)
+
+            metrics.update({f'{metric.prefix}/{k}': v for k, v in metric_dict.items()})
+
+            for k, v in metric_dict.items():
+                agg_metrics[k] = agg_metrics[k] + [v]
+
+        agg_metrics = {f'aggregate/{k}': np.mean(v) for k, v in agg_metrics.items()}
+        metrics.update(agg_metrics)
+        
+        return metrics

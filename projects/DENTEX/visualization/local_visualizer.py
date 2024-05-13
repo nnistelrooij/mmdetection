@@ -215,8 +215,9 @@ class MulticlassDetLocalVisualizer(DetLocalVisualizer):
                 bboxes[:, 2] - bboxes[:, 0])
             scales = _get_adaptive_scales(areas)
 
+            fdis = MulticlassDetLocalVisualizer.FDIs
             for i, (pos, label) in enumerate(zip(positions, labels)):
-                label_text = MulticlassDetLocalVisualizer.FDIs[label]
+                label_text = fdis[label] if label < len(fdis) else 'Irrelevant'
                 if 'multilabels' in instances:
                     attrs = []
                     for attr_idx in torch.nonzero(instances.multilabels[i])[:, 0]:
@@ -265,6 +266,10 @@ class MulticlassDetLocalVisualizer(DetLocalVisualizer):
                     for i in range(8):
                         binary_masks.append((mask & (2**i)) > 0)
                         counts[-1] += 1
+                elif mask.dtype == np.int64:
+                    for i in range(1, 9):
+                        binary_masks.append(mask == i)
+                        counts[-1] += 1
                 elif mask.dtype == np.bool_:
                     binary_masks.extend(mask)
                     counts[-1] += len(mask)
@@ -276,7 +281,10 @@ class MulticlassDetLocalVisualizer(DetLocalVisualizer):
 
             mask_colors = []
             for i in range(binary_masks.shape[0]):
-                color = mask_palette[i % len(mask_palette)]
+                if (i % 8) in [1, 2]:
+                    color = mask_palette[6 + (i % 8)]
+                else:
+                    color = colors[i // 8]
                 mask_colors.append(color)
 
             polygons = []

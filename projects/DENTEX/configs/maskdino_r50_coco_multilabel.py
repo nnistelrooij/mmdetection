@@ -86,11 +86,11 @@ val_pipeline=[
     dict(
         type='LoadImageFromFile',
     ),
+    dict(type='LoadMultilabelAnnotations', with_bbox=True, with_mask=True),
     dict(
         type='Resize',
         scale=(1333, 800),
         keep_ratio=True),
-    dict(type='LoadMultilabelAnnotations', with_bbox=True, with_mask=True),
     dict(
         type='PackMultilabelDetInputs',
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
@@ -152,5 +152,5 @@ visualizer = dict(
 )
 
 
-# load_from = 'checkpoints/maskdino_r50_mmdet.pth'
-load_from = 'work_dirs/opgs_fold_promaton_teeth_0/epoch_29.pth'
+load_from = 'checkpoints/maskdino_r50_mmdet.pth'
+# load_from = 'work_dirs/opgs_fold_promaton_teeth_0/epoch_29.pth'

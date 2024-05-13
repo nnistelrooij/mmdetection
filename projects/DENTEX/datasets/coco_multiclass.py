@@ -31,13 +31,18 @@ class CocoMulticlassDataset(CocoDataset):
         strict: bool=True,
         decode_masks: bool=True,
         num_workers: int=-1,
+        merge_layers: bool=False,
+        remove_irrelevant: bool=False,
         *args,
         **kwargs,
     ):
+
         metainfo['fdis'] = CocoMulticlassDataset.FDIs
         self.strict = strict
         self.decode_masks = decode_masks
         self.num_workers = num_workers
+        self.merge_layers = merge_layers
+        self.remove_irrelevant = remove_irrelevant
 
         super().__init__(metainfo=metainfo, *args, **kwargs)
 
@@ -134,8 +139,7 @@ class CocoMulticlassDataset(CocoDataset):
         if self.num_workers == 0:
             for img_id in tqdm(img_ids):
                 data_info = self.parse_data_info(img_id)
-                if data_info['instances']:
-                    data_list.append(data_info)
+                data_list.append(data_info)
         else:            
             chunk_size = 20
             img_ids_list = [img_ids[i:i+chunk_size] for i in range(0, len(img_ids), chunk_size)]
@@ -177,7 +181,7 @@ class CocoMulticlassDataset(CocoDataset):
             elif 'METAL_FILLING' in cat_name:
                 ann['category_name'] = 'CROWN_FILLING'
             else:
-                ann['category_name'] = cat_name[:-3]
+                ann['category_name'] = cat_name[:-3].lower()
             fdi = int(cat_name[-2:])
             fdi2anns[fdi] = fdi2anns[fdi] + [ann]
 
@@ -186,6 +190,10 @@ class CocoMulticlassDataset(CocoDataset):
     def _parse_instance(self, img_info, instance_info):
         fdi, anns = instance_info
 
+        if self.remove_irrelevant and fdi % 10 in [1, 2]:
+            print('incisor')
+            return None
+
         instance = {
             'bbox': np.array([img_info['width'], img_info['height'], 0, 0]),
             'bbox_label': CocoMulticlassDataset.FDIs.index(fdi),
@@ -193,6 +201,7 @@ class CocoMulticlassDataset(CocoDataset):
             'mask': np.zeros((img_info['height'], img_info['width']), dtype=np.uint8),
             'bbox_multilabel': np.zeros(self.n_unique_classes + self.n_attributes, dtype=int),
         }
+
         if self.decode_masks:
             instance['mask'] = np.tile(instance['mask'][None], (1 + self.n_attributes, 1, 1))
         else:
@@ -245,8 +254,17 @@ class CocoMulticlassDataset(CocoDataset):
                 instance['mask'][label] = maskUtils.merge([instance['mask'][label], rle])
 
             instance['bbox_multilabel'][label_idx] = 1
+
+        instance_width = instance['bbox'][2] - instance['bbox'][0]
+        if self.remove_irrelevant and (instance_width / img_info['width']) < 0.05:
+            return None
           
-        if self.decode_masks:
+        if self.merge_layers and self.decode_masks:
+            instance['mask'] = np.concatenate((
+                np.ones_like(instance['mask'][:1]), instance['mask'],
+            ))
+            instance['mask'] = instance['mask'].shape[0] - 1 - instance['mask'][::-1].argmax(axis=0)
+        elif self.decode_masks:
             instance['mask'] = sum(2 ** i * mask for i, mask in enumerate(instance['mask']))
 
         return instance
@@ -288,7 +306,8 @@ class CocoMulticlassDataset(CocoDataset):
         for fdi, anns in fdi2anns.items():
             instance = self._parse_instance(img_info, (fdi, anns))
                 
-            instances.append(instance)
+            if instance is not None:                
+                instances.append(instance)
 
         clean_instances = []
         for instance in instances:

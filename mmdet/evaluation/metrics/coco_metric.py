@@ -525,33 +525,35 @@ class CocoMetric(BaseMetric):
                     # precision: (iou, recall, cls, area range, max dets)
                     assert len(self.cat_ids) == precisions.shape[2]
 
-                    results_per_category = []
-                    for idx, cat_id in enumerate(self.cat_ids):
-                        # area range index 0: all area ranges
-                        # max dets index -1: typically 100 per image
-                        nm = self._coco_api.loadCats(cat_id)[0]
-                        precision = precisions[:, :, idx, 0, -1]
-                        precision = precision[precision > -1]
-                        if precision.size:
-                            ap = np.mean(precision)
-                        else:
-                            ap = float('nan')
-                        results_per_category.append(
-                            (f'{nm["name"]}', f'{round(ap, 3)}'))
-                        eval_results[f'{nm["name"]}_precision'] = round(ap, 3)
+                    for ious_range in [0, 5, range(10)]:
+                        logger.info('IoU:' + str(ious_range))
+                        results_per_category = []
+                        for idx, cat_id in enumerate(self.cat_ids):
+                            # area range index 0: all area ranges
+                            # max dets index -1: typically 100 per image
+                            nm = self._coco_api.loadCats(cat_id)[0]
+                            precision = precisions[ious_range, :, idx, 0, -1]
+                            precision = precision[precision > -1]
+                            if precision.size:
+                                ap = np.mean(precision)
+                            else:
+                                ap = float('nan')
+                            results_per_category.append(
+                                (f'{nm["name"]}', f'{round(ap, 3)}'))
+                            eval_results[f'{nm["name"]}_precision'] = round(ap, 3)
 
-                    num_columns = min(6, len(results_per_category) * 2)
-                    results_flatten = list(
-                        itertools.chain(*results_per_category))
-                    headers = ['category', 'AP'] * (num_columns // 2)
-                    results_2d = itertools.zip_longest(*[
-                        results_flatten[i::num_columns]
-                        for i in range(num_columns)
-                    ])
-                    table_data = [headers]
-                    table_data += [result for result in results_2d]
-                    table = AsciiTable(table_data)
-                    logger.info('\n' + table.table)
+                        num_columns = min(6, len(results_per_category) * 2)
+                        results_flatten = list(
+                            itertools.chain(*results_per_category))
+                        headers = ['category', 'AP'] * (num_columns // 2)
+                        results_2d = itertools.zip_longest(*[
+                            results_flatten[i::num_columns]
+                            for i in range(num_columns)
+                        ])
+                        table_data = [headers]
+                        table_data += [result for result in results_2d]
+                        table = AsciiTable(table_data)
+                        logger.info('\n' + table.table)
 
                 if metric_items is None:
                     metric_items = [

@@ -23,6 +23,7 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
         enable_multiclass: bool,
         hidden_dim: int,
         mask_dim: int,
+        share_mlp: bool,
         *args,
         **kwargs,
     ):
@@ -39,19 +40,28 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
         )
 
         if self.mask_classification:
-            if enable_multilabel:
-                self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
-            elif enable_multiclass and isinstance(num_classes, tuple):
+            if enable_multiclass and isinstance(num_classes, tuple):
                 assert len(num_classes) == 2
                 self.attributes_embed = nn.Linear(self.hidden_dim, num_classes[1])
+            elif enable_multilabel and isinstance(num_classes, int):
+                self.attributes_embed = nn.Linear(self.hidden_dim, num_attributes)
             else:
                 self.attributes_embed = nn.Identity()
 
-        if enable_multiclass:
-            self.mask_embed = nn.ModuleList([
+        if enable_multiclass and enable_multilabel:
+            self.seg_embeds = nn.ModuleList([
                 MLP(hidden_dim, hidden_dim, mask_dim, 3)
-                for _ in range(num_attributes)
+                for _ in range(num_attributes - 1)
             ])
+        elif enable_multiclass and not enable_multilabel:
+            self.share_mlp = share_mlp
+            if share_mlp:
+                self.seg_embeds = MLP(hidden_dim, hidden_dim, mask_dim * num_attributes, 3)
+            else:
+                self.seg_embeds = nn.ModuleList([
+                    MLP(hidden_dim, hidden_dim, mask_dim, 3)
+                    for _ in range(num_attributes)
+                ])
 
         self.enable_multilabel = enable_multilabel
         self.enable_multiclass = enable_multiclass
@@ -280,16 +290,35 @@ class MaskDINOMultilabelDecoder(MaskDINODecoder):
 
         outputs_mask = None
         if pred_mask:
-            if not self.enable_multiclass:
-                mask_embed = self.mask_embed(decoder_output)
-                outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
-            else:
-                outputs_masks = []
-                for mlp in self.mask_embed:
-                    mask_embed = mlp(decoder_output)
-                    outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
-                    outputs_masks.append(outputs_mask)
-                outputs_mask = torch.stack(outputs_masks, dim=2)
+            mask_embed = self.mask_embed(decoder_output)
+            outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
+            if self.enable_multiclass and self.enable_multilabel:
+                outputs_mask = outputs_mask[:, :, None]
+                for mlp in self.seg_embeds:
+                    seg_embed = mlp(decoder_output)
+                    mask = torch.einsum("bqc,bchw->bqhw", seg_embed, mask_features)
+                    outputs_mask = torch.cat((outputs_mask, mask[:, :, None]), dim=2)
+            elif self.enable_multiclass and not self.enable_multilabel:
+                outputs_mask = outputs_mask[:, :, None]
+                if self.share_mlp:
+                    seg_embeds = self.seg_embeds(decoder_output)
+                    seg_embeds = torch.split(seg_embeds, mask_embed.shape[-1], dim=-1)
+                    for i, seg_embed in enumerate(seg_embeds):
+                        mask = torch.einsum("bqc,bchw->bqhw", seg_embed, mask_features)
+                        if i == 0:
+                            outputs_mask = torch.cat((mask[:, :, None], outputs_mask), dim=2)
+                        else:
+                            outputs_mask = torch.cat((outputs_mask, mask[:, :, None]), dim=2)
+                else:
+                    for i, mlp in enumerate(self.seg_embeds):
+                        seg_embed = mlp(decoder_output)
+                        mask = torch.einsum("bqc,bchw->bqhw", seg_embed, mask_features)
+                        if i == 0:
+                            outputs_mask = torch.cat((mask[:, :, None], outputs_mask), dim=2)
+                        else:
+                            outputs_mask = torch.cat((outputs_mask, mask[:, :, None]), dim=2)
+                # mask_embed = self.mask_embed(decoder_output).reshape(*decoder_output.shape, -1)
+                # outputs_mask = torch.einsum("bqck,bchw->bqkhw", mask_embed, mask_features)
         
         outputs_attributes = self.attributes_embed(decoder_output)
         

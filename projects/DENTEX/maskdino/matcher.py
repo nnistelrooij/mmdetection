@@ -35,7 +35,7 @@ class HungarianMatcher(nn.Module):
     """
 
     def __init__(self, cost_class: float = 1, cost_mask: float = 1, cost_dice: float = 1, num_points: int = 0,
-                 cost_box: float = 0, cost_giou: float = 0, panoptic_on: bool = False,
+                 cost_box: float = 0, cost_giou: float = 0, panoptic_on: bool = False, enable_multilabel: bool = False,
                  enable_multiclass: bool = False, class_labels: list[int]=[0, 1, 2],
                 ):
         """Creates the matcher
@@ -53,6 +53,7 @@ class HungarianMatcher(nn.Module):
         self.cost_giou = cost_giou
 
         self.panoptic_on = panoptic_on
+        self.enable_multilabel = enable_multilabel
         self.enable_multiclass = enable_multiclass
 
         assert cost_class != 0 or cost_mask != 0 or cost_dice != 0, "all costs cant be 0"
@@ -95,9 +96,12 @@ class HungarianMatcher(nn.Module):
                 # gt masks are already padded when preparing target
                 tgt_mask = targets[b]["masks"].to(out_mask)
 
-                if self.enable_multiclass:
+                if self.enable_multilabel and self.enable_multiclass:
                     out_mask = out_mask[:, 0]
-                    tgt_mask = (tgt_mask == 1).to(out_mask)
+                    tgt_mask = (tgt_mask > 0).to(out_mask)
+                elif self.enable_multiclass:
+                    out_mask = out_mask[:, 1:].amax(1)
+                    tgt_mask = (tgt_mask > 0).to(out_mask)
 
                 out_mask = out_mask[:, None]
                 tgt_mask = tgt_mask[:, None]

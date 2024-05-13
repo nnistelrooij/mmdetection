@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 from projects.MaskDINO.maskdino.criterion import (
     SetCriterion,
@@ -81,6 +82,19 @@ def calculate_uncertainty(logits):
     return -(torch.abs(torch.amax(gt_class_logits[:, :-1], dim=1, keepdim=True)))
 
 
+def loss_masks_ce(
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    num_masks: float,
+):
+    """Classification loss (NLL)
+    targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
+    """
+    loss = F.cross_entropy(inputs, targets.long(), reduction="none")
+
+    return loss.mean(1).sum() / num_masks
+
+
 class SetMultilabelCriterion(SetCriterion):
     """This class computes the loss for DETR.
     The process happens in two steps:
@@ -95,7 +109,7 @@ class SetMultilabelCriterion(SetCriterion):
         tversky_weight=5.0,
         hnm_samples: int=-1,
         use_fed_loss: bool=True,
-    enable_multilabel: bool=False,
+        enable_multilabel: bool=False,
         enable_multiclass: bool=False,
         *args,
         **kwargs
@@ -129,7 +143,7 @@ class SetMultilabelCriterion(SetCriterion):
         self.enable_multiclass = enable_multiclass
 
         self.matcher = HungarianMatcher(
-            **matcher, panoptic_on=False, enable_multiclass=enable_multiclass,
+            **matcher, panoptic_on=False, enable_multilabel=enable_multilabel, enable_multiclass=enable_multiclass,
         )
 
     def set_federated_class_weights(
@@ -268,11 +282,13 @@ class SetMultilabelCriterion(SetCriterion):
 
         # No need to upsample predictions as we are using normalized coordinates :)
         # N x 1 x H x W
-        if self.enable_multiclass:
+        if self.enable_multilabel and self.enable_multiclass:
             target_masks = target_masks[tgt_idx]
             target_masks = torch.stack([
                 (target_masks & (2**i)) > 0 for i in range(src_masks.shape[1])
             ], dim=1).to(src_masks)
+        elif self.enable_multiclass:
+            target_masks = target_masks[tgt_idx][:, None]
         else:
             target_masks = target_masks.to(src_masks)
             target_masks = target_masks[tgt_idx]
@@ -290,10 +306,10 @@ class SetMultilabelCriterion(SetCriterion):
             )
             # get gt labels
             point_labels = point_sample(
-                target_masks,
+                target_masks.float(),
                 point_coords,
                 align_corners=False,
-            ).squeeze(1)
+            ).squeeze(1).to(target_masks)
 
         point_logits = point_sample(
             src_masks,
@@ -301,60 +317,20 @@ class SetMultilabelCriterion(SetCriterion):
             align_corners=False,
         ).squeeze(1)
 
-        losses = {
-            "loss_mask": sigmoid_ce_loss_jit(point_logits, point_labels, num_masks),
-            "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
-            # "loss_tversky": tversky_focal_loss(point_logits, point_labels, num_masks),
-        }
+        if not self.enable_multilabel and self.enable_multiclass:
+            losses = {
+                "loss_mask": loss_masks_ce(point_logits, point_labels, num_masks),
+            }
+        else:
+            losses = {
+                "loss_mask": sigmoid_ce_loss_jit(point_logits, point_labels, num_masks),
+                "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
+                # "loss_tversky": tversky_focal_loss(point_logits, point_labels, num_masks),
+            }
 
         del src_masks
         del target_masks
         return losses
-    
-    @torch.no_grad()
-    def hard_negative_mining(
-        self, outputs, targets, indices, num_masks,
-    ):
-        losses = self.loss_multilabels(outputs, targets, indices, num_masks, reduction='none')
-        losses = losses['loss_bces'].split([len(idxs[0]) for idxs in indices])
-
-        out = []
-        for target, (idxs_i, idxs_j), loss in zip(targets, indices, losses):
-            keep_mask = torch.any(target['multilabels'], dim=-1).to(loss.device)
-            keep_mask = keep_mask[idxs_j]
-
-            neg_idxs = torch.nonzero(~keep_mask)[:, 0]
-
-            _, idxs = loss[neg_idxs].topk(min(neg_idxs.shape[0], self.hnm_samples))
-            keep_mask[neg_idxs[idxs]] = True
-            keep_mask = keep_mask.cpu()
-
-            out.append((idxs_i[keep_mask], idxs_j[keep_mask]))
-
-        return out
-    
-    def split_diagnoses(self, targets):
-        out = []
-        for target in targets:
-            labels, multilabels, boxes, masks = [], [], [], []
-            for i, j in torch.nonzero(target['multilabels']):
-                multilabel = torch.zeros_like(target['multilabels'][i])
-                multilabel[j] = 1
-
-                labels.append(target['labels'][i])
-                multilabels.append(multilabel.argmax())
-                boxes.append(target['boxes'][i])
-                masks.append(target['masks'][i])
-
-            target = {
-                'labels': torch.stack(labels) if labels else target['labels'][:0],
-                'multilabels': torch.stack(multilabels) if labels else target['labels'][:0],
-                'boxes': torch.stack(boxes) if labels else target['boxes'][:0],
-                'masks': torch.stack(masks) if labels else target['masks'][:0],
-            }            
-            out.append(target)
-
-        return out
 
     def get_loss(self, loss, outputs, targets, indices, num_masks):
         loss_map = {

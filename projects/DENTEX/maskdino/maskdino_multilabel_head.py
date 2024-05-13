@@ -29,6 +29,7 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         num_classes = decoder.pop('num_classes')
         hnm_samples = train_cfg.pop('hnm_samples')
         use_fed_loss = train_cfg.pop('use_fed_loss')
+        share_mlp = decoder.pop('share_mlp')
         decoder['num_classes'] = num_classes if isinstance(num_classes, int) else num_classes[0]
         super().__init__(decoder=decoder, train_cfg=train_cfg, *args, **kwargs)
 
@@ -36,6 +37,7 @@ class MaskDINOMultilabelHead(MaskDINOHead):
         decoder['enable_multilabel'] = enable_multilabel
         decoder['enable_multiclass'] = enable_multiclass
         decoder['num_classes'] = num_classes
+        decoder['share_mlp'] = share_mlp
         self.predictor = MaskDINOMultilabelDecoder(**decoder)
 
         train_cfg['hnm_samples'] = hnm_samples

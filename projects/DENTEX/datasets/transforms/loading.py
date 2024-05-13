@@ -47,7 +47,16 @@ class LoadMultilabelAnnotations(LoadAnnotations):
         
 
 @TRANSFORMS.register_module()
-class LoadMulticlassAnnotations(LoadMultilabelAnnotations):        
+class LoadMulticlassAnnotations(LoadMultilabelAnnotations):
+
+    def __init__(
+        self,
+        merge_layers: bool,
+        *args, **kwargs,
+    ):
+        self.merge_layers = merge_layers
+
+        super().__init__(*args, **kwargs)
 
     def _load_masks(self, results: dict) -> None:
         """Private function to load mask annotations.
@@ -58,11 +67,17 @@ class LoadMulticlassAnnotations(LoadMultilabelAnnotations):
         if 'instances' not in results or not results['instances']:
             return results
 
-        if isinstance(results['instances'][0]['mask'], list):
+        if isinstance(results['instances'][0]['mask'], list) and not self.merge_layers:
             for instance in results['instances']:
                 mask = 0
                 for i, rle in enumerate(instance['mask']):
                     mask += 2 ** i * maskUtils.decode(rle)
+                instance['mask'] = mask
+        elif isinstance(results['instances'][0]['mask'], list) and self.merge_layers:
+            for instance in results['instances']:
+                mask = 0
+                for i, rle in enumerate(instance['mask'], 1):
+                    mask = np.maximum(mask, i * maskUtils.decode(rle))
                 instance['mask'] = mask
 
         h, w = results['ori_shape']

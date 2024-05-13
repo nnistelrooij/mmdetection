@@ -25,7 +25,6 @@ data_preprocessor = dict(
     pad_seg=True,
     seg_pad_value=255,
     batch_augments=batch_augments)
-
 num_things_classes = 80
 num_stuff_classes = 53
 num_classes = num_things_classes + num_stuff_classes
