@@ -1,5 +1,6 @@
 import pycocotools.mask as maskUtils
 import numpy as np
+from typing import Dict, Optional
 
 from mmcv.transforms import LoadImageFromFile
 from mmdet.datasets.transforms import LoadAnnotations
@@ -15,7 +16,7 @@ class LoadUInt16ImageFromFile(LoadImageFromFile):
     ):
         super().__init__(*args, **kwargs, color_type='unchanged')
 
-    def transform(self, results: dict) -> dict | None:
+    def transform(self, results: dict) -> Optional[Dict]:
         results = super().transform(results)
 
         results['img'] = np.tile(results['img'][..., None], (1, 1, 3)) / 257
