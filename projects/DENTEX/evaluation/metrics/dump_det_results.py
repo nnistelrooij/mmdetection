@@ -165,7 +165,10 @@ class DumpMulticlassDetResults(DumpResults):
             data_sample.pop('ignored_instances', None)
             data_sample.pop('gt_panoptic_seg', None)
 
-            if 'gt_instances' in data_sample:
+            if (
+                'gt_instances' in data_sample
+                and 'masks' in data_sample['gt_instances']
+            ):
                 gt = data_sample['gt_instances']
                 if gt['masks'].masks.dtype == np.bool_:
                     gt['masks'] = [

@@ -68,6 +68,11 @@ class CocoMulticlassMetric(CocoMetric):
             gt['height'] = data_sample['ori_shape'][0]
             gt['img_id'] = data_sample['img_id']
             gt['anns'] = []
+
+            if 'masks' not in data_sample['gt_instances']:
+                self.results.append((gt, result))
+                return
+            
             for bbox, label, mask in zip(*[
                 data_sample['gt_instances'][k] for k in ['bboxes', 'labels', 'masks']
             ]):
